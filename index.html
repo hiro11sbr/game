@@ -35,6 +35,10 @@
   #ammo { font-family: var(--num); font-size: 20px; font-weight: 600; letter-spacing: 0.02em; }
   #ammo small { font-size: 12px; opacity: 0.7; }
   #mag { font-family: var(--num); }
+  #wind { margin-top: 2px; font-variant-numeric: tabular-nums; }
+  #windArrow { display: inline-block; color: var(--accent); font-weight: 700; transition: transform 0.4s; }
+  #shot b { color: var(--accent); }
+  #shot .row { font-family: var(--num); font-size: 12px; }
   #shot {
     top: calc(max(10px, env(safe-area-inset-top)) + 64px); left: max(10px, env(safe-area-inset-left));
     font-variant-numeric: tabular-nums;
@@ -87,13 +91,14 @@
 <canvas id="scope" hidden></canvas>
 <div id="hud">
   <div id="info" class="panel">
-    <div><b>M110</b>　段階② 銃とスコープ</div>
+    <div><b>M110</b>　段階③ 弾道</div>
     <div id="pos">横 0.0 m</div>
   </div>
   <div id="shot" class="panel" hidden>—</div>
   <div id="status" class="panel">
     <div id="ammo">20<small> / 80</small></div>
     <div id="mag">7.62×51 M118LR</div>
+    <div id="wind"><span id="windArrow">↑</span> <span id="windTxt">風 —</span></div>
   </div>
   <div id="cross"></div>
   <div id="stick-base"></div>
@@ -209,6 +214,7 @@ const hitables = [];   // 弾が当たる物
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   geo.computeVertexNormals();
   const ground = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  ground.name = 'ground';
   scene.add(ground);
   hitables.push(ground);
 }
@@ -272,12 +278,14 @@ function makeLabel(text) {
       const board = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: makeLabel(d + 'm'), fog: true }));
       board.position.set(x, y + 1.2 + h / 2, -d);
       board.lookAt(0, y + 1.2 + h / 2, 0);
+      board.userData.kind = d + 'm看板';
       scene.add(board); hitables.push(board);
       const p = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.2 + h / 2, 0.15), post);
       p.position.set(x, y + (1.2 + h / 2) / 2, -d + 0.1); scene.add(p);
     }
     const stake = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.4), new THREE.MeshLambertMaterial({ color: 0xd9d4c4 }));
-    stake.position.set(0, heightAt(0, -d) + 0.3, -d); scene.add(stake); hitables.push(stake);
+    stake.position.set(0, heightAt(0, -d) + 0.3, -d); stake.userData.kind = d + 'm杭';
+    scene.add(stake); hitables.push(stake);
   }
 }
 
@@ -578,9 +586,140 @@ function spawnPuff(p, delay) {
   puffs.push({ sp, t: -delay, y0: p.y });
 }
 
-// ---------- 発射（段階②は仮：弾はまっすぐ飛ぶ。段階③で弾道計算に置き換える） ----------
+// =====================================================================
+//  弾道計算：重力＋空気抵抗（G7標準弾の抵抗表）＋風。1ミリ秒刻みで数値計算
+// =====================================================================
+const BALL = {
+  bcG7: 0.25,        // 弾道係数 G7（175gr SMK の販売店掲載値）
+  sightH: 0.065,     // スコープ中心と銃身の高さの差（m）
+  zeroRange: 100,    // 100mで照準と弾道が一致するよう調整済み
+  rho: 1.225,        // 空気密度（15℃・海面の標準大気）
+  sound: 340.3,      // 音速（m/s）
+  g: 9.80665,
+  mass: 0.01134,     // 175グレイン（kg）
+};
+// G7標準弾の抵抗係数（マッハ数, 抵抗係数）
+const G7 = [[0,.1198],[.05,.1197],[.1,.1196],[.15,.1194],[.2,.1193],[.25,.1194],[.3,.1194],[.35,.1194],[.4,.1193],[.45,.1193],[.5,.1194],[.55,.1193],[.6,.1194],[.65,.1197],[.7,.1202],[.725,.1207],[.75,.1215],[.775,.1226],[.8,.1242],[.825,.1266],[.85,.1306],[.875,.1368],[.9,.1464],[.925,.166],[.95,.2054],[.975,.2993],[1,.3803],[1.025,.4015],[1.05,.4043],[1.075,.4034],[1.1,.4014],[1.125,.3987],[1.15,.3955],[1.2,.3884],[1.25,.381],[1.3,.3732],[1.35,.3657],[1.4,.358],[1.5,.344],[1.55,.3376],[1.6,.3315],[1.65,.326],[1.7,.3209],[1.75,.316],[1.8,.3117],[1.85,.3078],[1.9,.3042],[1.95,.301],[2,.298],[2.05,.2951],[2.1,.2922],[2.15,.2892],[2.2,.2864],[2.25,.2835],[2.3,.2807],[2.35,.2779],[2.4,.2752],[2.45,.2725],[2.5,.2697],[2.6,.2643],[2.7,.2588],[2.8,.2533],[2.9,.2479],[3,.2424]];
+function g7cd(M) {
+  if (M <= 0) return G7[0][1];
+  for (let i = 1; i < G7.length; i++) if (M <= G7[i][0]) { const [m0, c0] = G7[i - 1], [m1, c1] = G7[i]; return c0 + (c1 - c0) * (M - m0) / (m1 - m0); }
+  return G7[G7.length - 1][1];
+}
+const KDRAG = BALL.rho * Math.PI / (8 * BALL.bcG7 * 703.0696);   // 703.07 = lb/in² → kg/m²
+function stepBullet(b, w, h) {
+  const rx = b.v[0] - w[0], ry = b.v[1] - w[1], rz = b.v[2] - w[2];
+  const sp = Math.hypot(rx, ry, rz), a = KDRAG * g7cd(sp / BALL.sound) * sp;
+  b.v[0] -= a * rx * h; b.v[1] -= (a * ry + BALL.g) * h; b.v[2] -= a * rz * h;
+  b.p[0] += b.v[0] * h; b.p[1] += b.v[1] * h; b.p[2] += b.v[2] * h;
+}
+// 100mで照準と弾道が一致する銃身の上向き角度を求める
+function computeZero() {
+  const NO_WIND = [0, 0, 0];
+  const yAt = ang => {
+    const b = { p: [0, -BALL.sightH, 0], v: [0, M110.muzzleVelocity * Math.sin(ang), -M110.muzzleVelocity * Math.cos(ang)] };
+    while (-b.p[2] < BALL.zeroRange) stepBullet(b, NO_WIND, 0.001);
+    return b.p[1];
+  };
+  let lo = -0.01, hi = 0.02;
+  for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (yAt(m) > 0) hi = m; else lo = m; }
+  return (lo + hi) / 2;
+}
+const ZERO_ANGLE = computeZero();
+
+// ---------- 風（ゆっくり強弱が変わる） ----------
+const wind = { base: 1 + Math.random() * 4, from0: Math.random() * Math.PI * 2, speed: 0, from: 0, vec: [0, 0, 0] };
+const windTxt = document.getElementById('windTxt'), windArrow = document.getElementById('windArrow');
+let windUiT = 0;
+function updateWind(t, dt) {
+  wind.speed = Math.max(0, wind.base * (1 + 0.25 * Math.sin(t * 0.37) + 0.15 * Math.sin(t * 1.1 + 2)));
+  wind.from = wind.from0 + 0.2 * Math.sin(t * 0.13);
+  // from=0 は正面（12時＝標的側）から吹く風。時計回りに 3時＝右から
+  const fx = Math.sin(wind.from), fz = -Math.cos(wind.from);
+  wind.vec[0] = -fx * wind.speed; wind.vec[1] = 0; wind.vec[2] = -fz * wind.speed;
+  windUiT -= dt;
+  if (windUiT <= 0) {
+    windUiT = 0.5;
+    let clock = Math.round(((wind.from % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / (Math.PI / 6)) % 12; if (clock === 0) clock = 12;
+    windTxt.textContent = `風 ${wind.speed.toFixed(1)} m/s・${clock}時から`;
+    const deg = Math.atan2(wind.vec[0], -wind.vec[2]) * 180 / Math.PI;   // 画面の上＝標的側
+    windArrow.style.transform = `rotate(${deg}deg)`;
+  }
+}
+
+// ---------- 弾の飛行 ----------
 const ray = new THREE.Raycaster();
 const tmpV = new THREE.Vector3();
+const traceTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 32; const g = c.getContext('2d');
+  const gr = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  gr.addColorStop(0, 'rgba(255,250,225,1)'); gr.addColorStop(0.4, 'rgba(255,235,180,0.5)'); gr.addColorStop(1, 'rgba(255,235,180,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 32, 32); return new THREE.CanvasTexture(c);
+})();
+const bullets = [];
+const segA = new THREE.Vector3(), segB = new THREE.Vector3(), segD = new THREE.Vector3();
+function launchBullet() {
+  camera.updateMatrixWorld();
+  const q = camera.quaternion;
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q), u = new THREE.Vector3(0, 1, 0).applyQuaternion(q), r = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+  const o = camera.position.clone().addScaledVector(u, -BALL.sightH);
+  const dir = f.clone().applyAxisAngle(r, ZERO_ANGLE);
+  const v0 = M110.muzzleVelocity;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: traceTex, transparent: true, depthWrite: false, sizeAttenuation: false, blending: THREE.AdditiveBlending, opacity: 0.9 }));
+  sp.scale.setScalar(0.014); sp.position.copy(o); scene.add(sp);
+  bullets.push({ p: [o.x, o.y, o.z], v: [dir.x * v0, dir.y * v0, dir.z * v0], t: 0, o, eye: camera.position.clone(), f, u, r, sp });
+}
+function endBullet(i) { const b = bullets[i]; scene.remove(b.sp); b.sp.material.dispose(); bullets.splice(i, 1); }
+function updateBullets(dt) {
+  const objs = hitables.filter(o => o.name !== 'ground');
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    const n = Math.max(1, Math.ceil(dt / 0.001)), h = dt / n;
+    segA.set(b.p[0], b.p[1], b.p[2]);
+    let groundHit = null;
+    for (let k = 0; k < n; k++) {
+      const px = b.p[0], py = b.p[1], pz = b.p[2];
+      stepBullet(b, wind.vec, h); b.t += h;
+      const gh = heightAt(b.p[0], b.p[2]);
+      if (b.p[1] <= gh) {
+        const g0 = py - heightAt(px, pz), g1 = b.p[1] - gh, s = g0 / (g0 - g1 || 1);   // 地面との交点を補間
+        groundHit = new THREE.Vector3(px + (b.p[0] - px) * s, py + (b.p[1] - py) * s, pz + (b.p[2] - pz) * s);
+        break;
+      }
+    }
+    segB.set(b.p[0], b.p[1], b.p[2]);
+    if (groundHit) segB.copy(groundHit);
+    // 看板・杭など（この1コマで進んだ区間を線分として判定）
+    segD.subVectors(segB, segA); const len = segD.length();
+    let hit = null;
+    if (len > 0) {
+      ray.set(segA, segD.normalize()); ray.near = 0; ray.far = len;
+      const h0 = ray.intersectObjects(objs, false)[0];
+      if (h0) hit = { point: h0.point, what: h0.object.userData.kind || '標的' };
+    }
+    if (!hit && groundHit) hit = { point: groundHit, what: '地面' };
+    if (hit) { reportImpact(b, hit); endBullet(i); continue; }
+    b.sp.position.set(b.p[0], b.p[1], b.p[2]);
+    b.sp.material.opacity = Math.max(0.25, 0.9 - b.t * 0.3);
+    if (b.t > 5 || -b.p[2] > 3000) { shotEl.innerHTML = '着弾なし（見失った）'; endBullet(i); }
+  }
+}
+function reportImpact(b, hit) {
+  const d = tmpV.subVectors(hit.point, b.eye);
+  const fwd = d.dot(b.f), up = d.dot(b.u), rt = d.dot(b.r);
+  const range = Math.hypot(hit.point.x - b.o.x, hit.point.z - b.o.z);
+  const milV = Math.atan2(up, fwd) * 1000, milH = Math.atan2(rt, fwd) * 1000;
+  const v = Math.hypot(b.v[0], b.v[1], b.v[2]), J = 0.5 * BALL.mass * v * v;
+  spawnPuff(hit.point.clone(), 0);
+  playImpact(range / BALL.sound);
+  const sg = x => (x >= 0 ? '+' : '−') + Math.abs(x);
+  shotEl.hidden = false;
+  shotEl.innerHTML =
+    `着弾 <b>${range.toFixed(0)} m</b>（${hit.what}）` +
+    `<div class="row">上下 ${sg(Math.round(up * 100))} cm（${sg(milV.toFixed(1))} ミル）</div>` +
+    `<div class="row">左右 ${sg(Math.round(rt * 100))} cm（${sg(milH.toFixed(1))} ミル）</div>` +
+    `<div class="row">飛行 ${b.t.toFixed(2)} 秒・${v.toFixed(0)} m/s・${(J / 1000).toFixed(1)} kJ</div>`;
+}
+
 function fire() {
   const now = performance.now() / 1000;
   if (S.reloading > 0) return;
@@ -592,19 +731,7 @@ function fire() {
   S.kick = 1;
   S.recoilV += S.aiming ? 0.11 : 0.16;          // 視点の跳ね上がり
 
-  // 視線の中心から（揺れを含めて）まっすぐ
-  ray.setFromCamera({ x: 0, y: 0 }, camera);
-  ray.far = 3000;
-  const hit = ray.intersectObjects(hitables, false)[0];
-  shotEl.hidden = false;
-  if (hit) {
-    const tof = hit.distance / M110.muzzleVelocity;
-    spawnPuff(hit.point.clone(), tof);
-    playImpact(tof + hit.distance / 343);
-    shotEl.innerHTML = `着弾 <b>${hit.distance.toFixed(0)} m</b>　飛行 ${tof.toFixed(2)} 秒<br><small>仮表示：弾はまっすぐ飛ぶ（段階③で弾道計算）</small>`;
-  } else {
-    shotEl.innerHTML = '着弾なし（空）';
-  }
+  launchBullet();
   if (S.mag === 0 && S.reserve > 0) setTimeout(reload, 400);
 }
 
@@ -670,6 +797,9 @@ function tick() {
   gun.rotation.set(r.x + S.kick * 0.05 + rl * 0.5, r.y, r.z - rl * 0.35);
   gun.visible = !inScope;
 
+  updateWind(t0, dt);
+  updateBullets(dt);
+
   // 土煙
   for (let i = puffs.length - 1; i >= 0; i--) {
     const p = puffs[i]; p.t += dt;
@@ -698,5 +828,5 @@ addEventListener('resize', () => {
 });
 
 // テスト用の入口
-window.__game = { fire, toggleAim, setZoom, reload, S, gun, HIP, puffs, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, get pitch() { return pitch; }, set pitch(v) { pitch = v; } };
+window.__game = { fire, toggleAim, setZoom, reload, S, gun, HIP, puffs, bullets, wind, ZERO_ANGLE, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, get pitch() { return pitch; }, set pitch(v) { pitch = v; } };
 </script>
