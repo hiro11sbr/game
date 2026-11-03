@@ -42,8 +42,17 @@
   }
   #pos b { color: var(--accent); }
   #shot {
-    top: max(4px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); white-space: nowrap; text-align: center;
+    position: absolute; top: max(6px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+    white-space: nowrap; text-align: center; font-size: 12px; line-height: 1.45; letter-spacing: 0.02em;
+    text-shadow: 0 1px 2px #000, 0 0 8px rgba(0,0,0,0.8); transition: opacity 0.6s; pointer-events: none;
   }
+  #shot.fade { opacity: 0; }
+  #lrfHud {
+    position: absolute; left: 50%; top: 50%; transform: translate(calc(min(47vh, 47vw) * 0.38), calc(-100% - min(47vh, 47vw) * 0.52));
+    font-family: var(--num); font-size: 13px; font-weight: 600; color: #ff5a3a; letter-spacing: 0.04em;
+    text-shadow: 0 0 3px rgba(0,0,0,0.9), 0 1px 2px #000; pointer-events: none;
+  }
+  #lrfHud[hidden] { display: none; }
   #gear {
     width: 40px; height: 40px; font-size: 20px; border-radius: 10px;
     top: max(6px, env(safe-area-inset-top)); right: max(6px, env(safe-area-inset-right));
@@ -82,14 +91,14 @@
   #settings .opts button { font: inherit; color: var(--hud-fg); background: rgba(255,255,255,0.06); border: 1px solid var(--hud-line); border-radius: 8px; padding: 7px 10px; }
   #settings .opts button.on { background: var(--btn-on); color: #1d1f1b; border-color: transparent; font-weight: 600; }
   #settings .note { font-size: 11px; opacity: 0.7; }
-  #ammo { font-family: var(--num); font-size: 20px; font-weight: 600; letter-spacing: 0.02em; }
+  #ammo { font-family: var(--num); font-size: 13px; font-weight: 600; }
   #ammo small { font-size: 12px; opacity: 0.7; }
   #mag { font-family: var(--num); }
   #wind { margin-top: 2px; font-variant-numeric: tabular-nums; }
   #windArrow { display: inline-block; color: var(--accent); font-weight: 700; transition: transform 0.4s; }
   #shot { font-variant-numeric: tabular-nums; }
   #shot b { color: var(--accent); }
-  #shot .row { font-family: var(--num); font-size: 12px; }
+  #shot .row { font-family: var(--num); font-size: 11px; opacity: 0.85; }
   #cross {
     position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px;
     border-radius: 50%; background: var(--hud-fg); box-shadow: 0 0 2px #000;
@@ -175,9 +184,10 @@
     <div id="wind"><span id="windArrow">↑</span> <span id="windTxt">風 —</span></div>
   </div>
   </div>
-  <div id="shot" class="panel" hidden>—</div>
+  <div id="shot" hidden>—</div>
+  <div id="lrfHud" hidden>— m</div>
   <button id="gear" class="btn" type="button" aria-label="設定">⚙</button>
-  <div id="wpn"><div><span id="ammoName">M110</span>・<span id="mag">7.62×51 M118LR</span></div><div id="ammo">20<small> / 80</small></div></div>
+  <div id="wpn"><span id="ammoName">M110</span>・<span id="mag">7.62×51 M118LR</span>・<span id="ammo">20<small> / 80</small></span></div>
   <div id="cross"></div>
   <div id="stick-base"></div>
   <div id="stick-knob"></div>
@@ -192,7 +202,6 @@
       <span></span><button id="eDn" class="btn" type="button" aria-label="着弾を下へ">▼</button><span></span>
     </div>
     <div class="val">上下 <b id="eVal">+0.0</b>・左右 <b id="wVal">0.0</b></div>
-    <div class="lr"><button id="lrf" class="btn" type="button">測距</button><span class="val" id="lrfVal">— m</span></div>
     </div>
   </div>
   <div id="zoom" hidden>
@@ -213,7 +222,7 @@
     </div>
     <ul class="list" id="optList">
       <li>弾筋：<span class="opts" data-k="tracer"><button data-v="none">なし</button><button data-v="white">白</button><button data-v="red">赤</button></span></li>
-      <li>見えない壁：<span class="opts" data-k="wall"><button data-v="on">表示する</button><button data-v="off">表示しない</button></span></li>
+      <li>通過点マーク：<span class="opts" data-k="wall"><button data-v="on">表示する</button><button data-v="off">表示しない</button></span></li>
     </ul>
   </div>
 </div>
@@ -1344,7 +1353,7 @@ function drawScope() {
   c.restore();
   c.textBaseline = 'alphabetic';
   c.fillStyle = 'rgba(238,240,232,0.75)'; c.font = '11px ui-monospace, Menlo, monospace'; c.textAlign = 'center';
-  c.fillText(`目盛り1本 = ${step}ミル・数字はミル（1ミル＝100mで10cm）`, cx, Math.min(cy + r + 14, H - PAD - 6));
+
   zoomEl.textContent = zoom.toFixed(1) + 'x';
 }
 
@@ -1458,7 +1467,8 @@ function drawZoomGauge() {
 document.getElementById('rotate').addEventListener('click', e => e.currentTarget.classList.remove('show'));
 
 // ---------- スコープ調整（押し続けると速く回る）・測距・弾道の切り替え ----------
-const eValEl = document.getElementById('eVal'), wValEl = document.getElementById('wVal'), lrfValEl = document.getElementById('lrfVal');
+const lrfHudEl = document.getElementById('lrfHud');
+const eValEl = document.getElementById('eVal'), wValEl = document.getElementById('wVal'), lrfValEl = { innerHTML: '' }; let lrfDist = 0, lrfT = 0;
 const dialBox = document.getElementById('dial');
 function showDial() {
   eValEl.textContent = (dial.e >= 0 ? '+' : '') + dial.e.toFixed(1);
@@ -1479,13 +1489,15 @@ holdRepeat(document.getElementById('eDn'), s => { dial.e = Math.round((dial.e - 
 holdRepeat(document.getElementById('wR'), s => { dial.w = Math.round((dial.w + s) * 10) / 10; showDial(); clickSnd(); });
 holdRepeat(document.getElementById('wL'), s => { dial.w = Math.round((dial.w - s) * 10) / 10; showDial(); clickSnd(); });
 const lrfRay = new THREE.Raycaster();
+let shotTimer = 0;
+function showShot() { shotEl.hidden = false; shotEl.classList.remove('fade'); clearTimeout(shotTimer); shotTimer = setTimeout(() => shotEl.classList.add('fade'), 5000); }
 function rangefind() {
   camera.updateMatrixWorld();
   lrfRay.setFromCamera({ x: 0, y: 0 }, camera); lrfRay.far = 8000;
   const h = lrfRay.intersectObjects(hitables.filter(shown), false)[0];
-  lrfValEl.innerHTML = h ? `<b>${h.distance.toFixed(0)}</b> m` : '— m';
+  lrfDist = h ? h.distance : 0; lrfValEl.innerHTML = h ? `<b>${h.distance.toFixed(0)}</b> m` : '— m';
 }
-bindBtn(document.getElementById('lrf'), rangefind, false);
+
 // 武器の切り替え：M110 → TAC-50（ボルト操作）→ PX-20（架空）
 const WEAPONS = [
   { label: 'M110', ammo: 'm118', model: 'm110', mag: 20, reserve: 80 },
@@ -1502,7 +1514,7 @@ function setWeapon(i) {
   dial.e = dial.w = 0; showDial();
   document.getElementById('ammoName').textContent = weapon.label;
 }
-// ---------- 設定（⚙）：武器・ステージ・弾筋・見えない壁 ----------
+// ---------- 設定（⚙）：武器・ステージ・弾筋・通過点マーク ----------
 const OPT = { tracer: 'white', wall: 'on' };
 const setEl = document.getElementById('settings');
 const WEAPON_DESC = ['半自動・7.62×51・3.5〜10倍', 'ボルト式・.50口径・7〜35倍', '架空・赤色レーザー・5〜40倍', 'ボルト式・7.62×54R・3.5倍固定'];
@@ -1893,7 +1905,7 @@ function updateTrail(tr, now, pxW) {
   return deadFade > 0;
 }
 
-// ---------- 見えない壁：標的の距離を弾が通り過ぎた位置に、弾痕のような赤い印を数秒残す ----------
+// ---------- 通過点マーク：標的の距離を弾が通り過ぎた位置に、弾痕のような赤い印を数秒残す ----------
 const zoneRay = new THREE.Raycaster();
 const ZONE = { g: new THREE.Group(), t: -1, mark: null, lines: null };
 {
@@ -1923,9 +1935,9 @@ function showZone(b, P) {
   ZONE.mark.position.copy(P);
   const rt = new THREE.Vector3().subVectors(b.eye, A).setY(0).normalize(); const right = new THREE.Vector3(rt.z, 0, -rt.x);   // 射手から見て右
   const dx = new THREE.Vector3().subVectors(P, A).dot(right), dy = P.y - A.y;
-  b.wallTxt = `見えない壁 ${D.toFixed(0)} m：上下 ${dy >= 0 ? '+' : '−'}${Math.abs(dy * 100).toFixed(0)} cm（${(dy / mil).toFixed(1)} ミル）・左右 ${dx >= 0 ? '+' : '−'}${Math.abs(dx * 100).toFixed(0)} cm（${(dx / mil).toFixed(1)} ミル）`;
+  b.wallTxt = `通過点 ${D.toFixed(0)}m 上下${dy >= 0 ? '+' : '−'}${Math.abs(dy / mil).toFixed(1)}・左右${dx >= 0 ? '+' : '−'}${Math.abs(dx / mil).toFixed(1)}`;
   ZONE.g.visible = false; ZONE.mark.visible = true; ZONE.t = 0;   // 格子は出さず、通過位置に弾痕の印だけ
-  shotEl.hidden = false; shotEl.innerHTML = `<div class="row">${b.wallTxt}</div>`;
+  shotEl.innerHTML = `<div class="row">${b.wallTxt} ミル</div>`; showShot();
 }
 function updateZone(dt) {
   if (ZONE.t < 0) return;
@@ -1954,7 +1966,7 @@ function launchBullet() {
   const v0 = ammo.v0;
   const tr = makeTrail(); trails.push(tr);
   tr.pts.push({ p: o.clone().addScaledVector(dir, 0.8), t: simNow, d: 0.8 });
-  // 見えない壁：照準の中心にある物までの距離に壁を置く
+  // 通過点マーク：照準の近くの標的までの距離を記録
   // 照準の近く（4ミル以内）に敵兵・クマ・鉄板があれば、その距離に置き、照準点を中心にする
   let zoneA = null, best = 0.004;
   const tryPt = (P) => { const d = P.clone().sub(camera.position), L = d.length(), ang = d.normalize().angleTo(f); if (ang < best) { best = ang; zoneA = camera.position.clone().addScaledVector(f, L); } };
@@ -2030,7 +2042,7 @@ function updateBullets(dt) {
       reportImpact(b, hit); bullets.splice(i, 1); continue;
     }
     b.tr.pts.push({ p: new THREE.Vector3(b.p[0], b.p[1], b.p[2]), t: simNow, d: b.dist });
-    if (b.t > 16 || -b.p[2] > 6500) { shotEl.innerHTML = '着弾なし（見失った）'; b.tr.dead = simNow; bullets.splice(i, 1); }
+    if (b.t > 16 || -b.p[2] > 6500) { shotEl.innerHTML = '着弾なし（見失った）'; showShot(); b.tr.dead = simNow; bullets.splice(i, 1); }
   }
 }
 
@@ -2222,7 +2234,7 @@ function fireLaser() {
   const h0 = all.find(x => x.object === activeGround || shown(x.object));
   const end = h0 ? h0.point.clone() : eye.clone().addScaledVector(dir, 9000);
   gun.updateMatrix(); let mz = gunPointToWorld(muzzleLocal.copy(gun.userData.muzzle), new THREE.Vector3());
-  if (S.aimT > 0.9) mz = eye.clone().addScaledVector(f, 1.2).addScaledVector(r, 0.22).addScaledVector(u, -0.2);   // スコープ中は右下から飛び込んで見えるように
+  if (S.aimT > 0.9) mz = eye.clone().addScaledVector(f, 0.6).addScaledVector(u, -0.075);   // スコープ中：銃身はスコープの真下なので、照準の真下から真っすぐ伸びる
   const mat = beamMat.clone();
   const mesh = new THREE.Group(); mesh.renderOrder = 5; traceScene.add(mesh);
   const dotMat = new THREE.SpriteMaterial({ map: rodTex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false });
@@ -2310,7 +2322,7 @@ function reportImpact(b, hit) {
     if (hit.enemy) { what = '<b>敵兵（レーザーで無力化）</b>'; enemyHit(hit.enemy, 'torso'); mat = 'bear'; }
     if (hit.bear) { what = '<b>ヒグマ（レーザーで即倒）</b>'; bearHit(hit.bear, 'head'); mat = 'bear'; }
     impactFx(hit, mat, 60, range); explode(hit, range);
-    shotEl.hidden = false; shotEl.innerHTML = `命中 <b>${range.toFixed(0)} m</b>（${what}）・光速で一直線（落下なし）`;
+    shotEl.innerHTML = `<b>${range.toFixed(0)} m</b> ${what}`; showShot();
     return;
   }
   let mat = hit.water ? 'water' : hit.obj.userData.mat || 'dirt', what = hit.water ? '川' : hit.obj.userData.kind || '標的';
@@ -2333,9 +2345,10 @@ function reportImpact(b, hit) {
   const sg = x => (x >= 0 ? '+' : '−') + Math.abs(x);
   shotEl.hidden = false;
   shotEl.innerHTML =
-    `着弾 <b>${range.toFixed(0)} m</b>（${what}）・${b.t.toFixed(2)} 秒・${v.toFixed(0)} m/s` +
-    `<div class="row">照準から 上下 ${sg(Math.round(up * 100))} cm（${sg(milV.toFixed(1))}）・左右 ${sg(Math.round(rt * 100))} cm（${sg(milH.toFixed(1))}）ミル</div>` +
-    (b.wallTxt ? `<div class="row">${b.wallTxt}</div>` : '');
+    `<b>${range.toFixed(0)} m</b> ${what}・${b.t.toFixed(2)}秒` +
+    `<div class="row">照準から 上下${sg(milV.toFixed(1))}・左右${sg(milH.toFixed(1))} ミル` +
+    (b.wallTxt ? `｜${b.wallTxt}` : '') + `</div>`;
+  showShot();
 }
 
 // =====================================================================
@@ -2504,6 +2517,8 @@ function tick() {
   S.aimT += ((S.aiming ? 1 : 0) - S.aimT) * Math.min(1, dt * 12);
   const inScope = S.aimT > 0.92;
   scopeCv.hidden = !inScope; zoomBox.hidden = !inScope; dialBox.hidden = !inScope;
+  lrfHudEl.hidden = !inScope;
+  if (inScope && (lrfT -= dt) <= 0) { lrfT = 0.2; rangefind(); lrfHudEl.textContent = lrfDist ? `${lrfDist.toFixed(0)} m` : '---- m'; }   // 照準の先までの距離を常に表示
   crossEl.style.display = S.aimT > 0.2 ? 'none' : ''; helpEl.style.display = S.aimT > 0.2 ? 'none' : '';
   if (inScope) camera.fov = scopeFovDeg() * (innerHeight / (2 * scopeRadiusPx()));
   else camera.fov = BASE_FOV - S.aimT * 20;
@@ -2581,7 +2596,7 @@ function tick() {
   // 飛行中の表示（遠距離は着弾まで数秒かかる）
   if (bullets.length && !frozen) {
     const b = bullets[0];
-    if (b.t > 0.6) { shotEl.hidden = false; shotEl.innerHTML = `飛行中 <b>${b.t.toFixed(1)} 秒</b>・${Math.hypot(b.v[0], b.v[1], b.v[2]).toFixed(0)} m/s<div class="row">${(-b.p[2] + b.o.z).toFixed(0)} m 地点</div>`; }
+    if (b.t > 0.6) { shotEl.innerHTML = `飛行中 <b>${b.t.toFixed(1)}秒</b>・${Math.hypot(b.v[0], b.v[1], b.v[2]).toFixed(0)} m/s`; showShot(); }
   }
   // 着弾の土煙（旧）
   for (let i = puffs.length - 1; i >= 0; i--) {
