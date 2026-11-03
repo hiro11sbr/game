@@ -1,0 +1,298 @@
+<title>Long Range 3D</title>
+<style>
+  /* 全画面の3D射撃場。暗い半透明の計器パネルを画面の角に置く単一テーマ */
+  :root {
+    color-scheme: dark;
+    --hud-fg: #eef0e8;
+    --hud-bg: rgba(20, 22, 18, 0.55);
+    --hud-line: rgba(244, 241, 234, 0.35);
+    --accent: #e8b04a;
+  }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: #8fa9bf;
+    font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    -webkit-user-select: none; user-select: none; touch-action: none;
+    -webkit-touch-callout: none; color: var(--hud-fg);
+  }
+  canvas { display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+  .panel {
+    position: absolute; background: var(--hud-bg); border: 1px solid var(--hud-line);
+    border-radius: 8px; padding: 6px 10px; font-size: 12px; line-height: 1.5;
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  }
+  #info { top: max(10px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); }
+  #info b { color: var(--accent); font-weight: 600; }
+  #cross {
+    position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px;
+    border-radius: 50%; background: var(--hud-fg); box-shadow: 0 0 2px #000;
+  }
+  #stick-base {
+    position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%;
+    border: 2px solid var(--hud-line); background: rgba(20,22,18,0.25); display: none;
+  }
+  #stick-knob {
+    position: absolute; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%;
+    background: rgba(244,241,234,0.55); display: none;
+  }
+  #help {
+    bottom: max(10px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+    white-space: nowrap; opacity: 0.85;
+  }
+  #rotate {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px; background: rgba(20,22,18,0.82); font-size: 16px; z-index: 5;
+    pointer-events: auto;
+  }
+  #rotate small { opacity: 0.7; }
+  @media (orientation: portrait) and (max-width: 820px) { #rotate.show { display: flex; } }
+</style>
+<div id="hud">
+  <div id="info" class="panel">
+    <div><b>射撃場</b>　段階① 土台</div>
+    <div id="pos">射撃位置から 0 m</div>
+  </div>
+  <div id="cross"></div>
+  <div id="stick-base"></div>
+  <div id="stick-knob"></div>
+  <div id="help" class="panel">左側ドラッグ：移動　／　右側ドラッグ：視点</div>
+</div>
+<div id="rotate" class="show">
+  <div>📱 横向きにしてください</div>
+  <small>タップでこのまま続ける</small>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// ---------- 基本設定（1単位 = 1m） ----------
+const RANGE_LEN = 1000;          // 標的までの最大距離
+const LANE_HALF = 30;            // 射撃レーンの半幅
+const EYE_H = 1.65;              // 目の高さ（立ち）
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const FOG_COLOR = new THREE.Color(0xb9c8d4);
+scene.fog = new THREE.Fog(FOG_COLOR, 400, 2600);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 6000);
+camera.rotation.order = 'YXZ';
+camera.position.set(0, EYE_H, 2);
+
+// ---------- 光 ----------
+scene.add(new THREE.HemisphereLight(0xcfe3f5, 0x5a6b3a, 0.9));
+const sun = new THREE.DirectionalLight(0xfff1d6, 2.2);
+sun.position.set(-300, 500, 200);
+scene.add(sun);
+
+// ---------- 空 ----------
+{
+  const geo = new THREE.SphereGeometry(5000, 32, 16);
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: { top: { value: new THREE.Color(0x4f86c0) }, horizon: { value: FOG_COLOR } },
+    vertexShader: `varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: `uniform vec3 top; uniform vec3 horizon; varying vec3 vP;
+      void main(){ float t = clamp(vP.y*2.2, 0.0, 1.0); gl_FragColor = vec4(mix(horizon, top, pow(t,0.7)), 1.0); }`
+  });
+  scene.add(new THREE.Mesh(geo, mat));
+}
+
+// ---------- 地形 ----------
+function hash(x, z) { const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453; return s - Math.floor(s); }
+function vnoise(x, z) {
+  const xi = Math.floor(x), zi = Math.floor(z), xf = x - xi, zf = z - zi;
+  const u = xf * xf * (3 - 2 * xf), v = zf * zf * (3 - 2 * zf);
+  const a = hash(xi, zi), b = hash(xi + 1, zi), c = hash(xi, zi + 1), d = hash(xi + 1, zi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm(x, z) { let s = 0, a = 1, f = 1; for (let i = 0; i < 4; i++) { s += a * vnoise(x * f, z * f); a *= 0.5; f *= 2; } return s / 1.875; }
+function heightAt(x, z) {
+  const side = Math.max(0, Math.abs(x) - LANE_HALF);           // レーンの外ほど起伏
+  const sideRise = Math.min(1, side / 250);
+  let h = (fbm(x / 180, z / 180) - 0.5) * 6;                   // ゆるい起伏
+  h += sideRise * sideRise * 70 * fbm(x / 400 + 7, z / 400 + 3);
+  const laneFlat = 1 - Math.min(1, side / 40);
+  h *= 1 - laneFlat * 0.92;
+  if (z < -RANGE_LEN - 60) h += Math.min(1, (-RANGE_LEN - 60 - z) / 120) * 25; // 奥の土手
+  if (z < -1800) h += (-1800 - z) * 0.35 * fbm(x / 300, z / 300);             // 遠景の山
+  return h;
+}
+{
+  const size = 5000, seg = 220;
+  const geo = new THREE.PlaneGeometry(size, size, seg, seg);
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, 0, -size / 2 + 800);
+  const pos = geo.attributes.position, col = [];
+  const cGrass = new THREE.Color(0x6f8a3f), cDry = new THREE.Color(0xa49a5c), cLane = new THREE.Color(0x86a14c), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    pos.setY(i, heightAt(x, z));
+    const n = fbm(x / 60, z / 60);
+    c.copy(cGrass).lerp(cDry, Math.max(0, n - 0.45) * 1.6);
+    if (Math.abs(x) < LANE_HALF && z < 10 && z > -RANGE_LEN - 40) c.lerp(cLane, 0.6);
+    col.push(c.r, c.g, c.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.computeVertexNormals();
+  const ground = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  scene.add(ground);
+}
+
+// ---------- 木（まとめて描画して軽くする） ----------
+{
+  const COUNT = 900;
+  const leaf = new THREE.InstancedMesh(new THREE.ConeGeometry(2.4, 9, 7), new THREE.MeshLambertMaterial({ color: 0x3e5a2c }), COUNT);
+  const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.25, 0.35, 2.5, 5), new THREE.MeshLambertMaterial({ color: 0x5b4632 }), COUNT);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
+  let n = 0, seed = 1;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  while (n < COUNT) {
+    const x = (rnd() - 0.5) * 1400, z = 60 - rnd() * 1400;
+    if (Math.abs(x) < LANE_HALF + 25) continue;
+    if (fbm(x / 90, z / 90) < 0.45) continue;                     // 林のかたまりを作る
+    const k = 0.7 + rnd() * 0.8, y = heightAt(x, z);
+    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * 6.28);
+    m.compose(p.set(x, y + 2.5 + 4.5 * k, z), q, s.set(k, k, k)); leaf.setMatrixAt(n, m);
+    m.compose(p.set(x, y + 1.25 * k, z), q, s.set(k, k, k)); trunk.setMatrixAt(n, m);
+    n++;
+  }
+  scene.add(leaf, trunk);
+}
+
+// ---------- 射撃位置（コンクリートの台・屋根・射撃台） ----------
+{
+  const concrete = new THREE.MeshLambertMaterial({ color: 0xb8b4aa });
+  const wood = new THREE.MeshLambertMaterial({ color: 0x8a6a48 });
+  const metal = new THREE.MeshLambertMaterial({ color: 0x8a8f93, emissive: 0x3a3d40 });
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(24, 0.2, 8), concrete); pad.position.set(0, 0.1, 3); scene.add(pad);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(24, 0.15, 7), metal); roof.position.set(0, 3.2, 4); roof.rotation.x = -0.08; scene.add(roof);
+  for (const x of [-11.5, 11.5]) for (const z of [0.8, 7]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 3.2, 0.18), metal); post.position.set(x, 1.6, z); scene.add(post);
+  }
+  for (const x of [-6, 0, 6]) {
+    const top = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.08, 1.0), wood); top.position.set(x, 0.9, 0.4); scene.add(top);
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 0.12), wood); leg.position.set(x, 0.5, 0.4); scene.add(leg);
+  }
+  // 射撃線（白線）
+  const line = new THREE.Mesh(new THREE.PlaneGeometry(24, 0.12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  line.rotation.x = -Math.PI / 2; line.position.set(0, 0.21, -0.95); scene.add(line);
+}
+
+// ---------- 距離看板（100mごと） ----------
+function makeLabel(text) {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#f2efe6'; g.fillRect(0, 0, 256, 128);
+  g.strokeStyle = '#1d1f1b'; g.lineWidth = 10; g.strokeRect(5, 5, 246, 118);
+  g.fillStyle = '#1d1f1b'; g.font = 'bold 72px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 128, 68);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+}
+{
+  const post = new THREE.MeshLambertMaterial({ color: 0x4a4036 });
+  for (let d = 100; d <= RANGE_LEN; d += 100) {
+    const w = 2.4 + d / 120, h = w / 2;
+    for (const x of [-LANE_HALF - 2, LANE_HALF + 2]) {
+      const y = heightAt(x, -d);
+      const board = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: makeLabel(d + 'm'), fog: true }));
+      board.position.set(x, y + 1.2 + h / 2, -d);
+      board.lookAt(0, y + 1.2 + h / 2, 0);
+      scene.add(board);
+      const p = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.2 + h / 2, 0.15), post);
+      p.position.set(x, y + (1.2 + h / 2) / 2, -d + 0.1); scene.add(p);
+    }
+    // レーン中央の小さな距離杭
+    const stake = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.4), new THREE.MeshLambertMaterial({ color: 0xd9d4c4 }));
+    stake.position.set(0, heightAt(0, -d) + 0.3, -d); scene.add(stake);
+  }
+}
+
+// ---------- 操作（スマホ：左で移動・右で視点／PC：WASD＋ドラッグ） ----------
+const move = { x: 0, y: 0 };
+let yaw = 0, pitch = 0;
+const stickBase = document.getElementById('stick-base'), stickKnob = document.getElementById('stick-knob');
+const touches = new Map();  // id -> {type, sx, sy, lx, ly}
+const LOOK_SENS = 0.0042;
+
+function onDown(id, x, y) {
+  const type = x < innerWidth * 0.45 ? 'move' : 'look';
+  for (const t of touches.values()) if (t.type === type) return; // 同じ役割は1本の指だけ
+  touches.set(id, { type, sx: x, sy: y, lx: x, ly: y });
+  if (type === 'move') {
+    stickBase.style.display = stickKnob.style.display = 'block';
+    stickBase.style.left = stickKnob.style.left = x + 'px';
+    stickBase.style.top = stickKnob.style.top = y + 'px';
+  }
+}
+function onMoveP(id, x, y) {
+  const t = touches.get(id); if (!t) return;
+  if (t.type === 'move') {
+    let dx = x - t.sx, dy = y - t.sy; const len = Math.hypot(dx, dy), max = 50;
+    if (len > max) { dx *= max / len; dy *= max / len; }
+    move.x = dx / max; move.y = dy / max;
+    stickKnob.style.left = (t.sx + dx) + 'px'; stickKnob.style.top = (t.sy + dy) + 'px';
+  } else {
+    yaw -= (x - t.lx) * LOOK_SENS; pitch -= (y - t.ly) * LOOK_SENS;
+    pitch = Math.max(-1.3, Math.min(1.3, pitch));
+  }
+  t.lx = x; t.ly = y;
+}
+function onUp(id) {
+  const t = touches.get(id); if (!t) return;
+  if (t.type === 'move') { move.x = move.y = 0; stickBase.style.display = stickKnob.style.display = 'none'; }
+  touches.delete(id);
+}
+const cv = renderer.domElement;
+cv.addEventListener('touchstart', e => { e.preventDefault(); for (const t of e.changedTouches) onDown(t.identifier, t.clientX, t.clientY); }, { passive: false });
+cv.addEventListener('touchmove', e => { e.preventDefault(); for (const t of e.changedTouches) onMoveP(t.identifier, t.clientX, t.clientY); }, { passive: false });
+cv.addEventListener('touchend', e => { for (const t of e.changedTouches) onUp(t.identifier); });
+cv.addEventListener('touchcancel', e => { for (const t of e.changedTouches) onUp(t.identifier); });
+cv.addEventListener('mousedown', e => onDown('m', e.clientX, e.clientY));
+addEventListener('mousemove', e => onMoveP('m', e.clientX, e.clientY));
+addEventListener('mouseup', () => onUp('m'));
+const keys = {};
+addEventListener('keydown', e => keys[e.code] = true);
+addEventListener('keyup', e => keys[e.code] = false);
+
+document.getElementById('rotate').addEventListener('click', e => e.currentTarget.classList.remove('show'));
+
+// ---------- ループ ----------
+const posEl = document.getElementById('pos');
+const clock = new THREE.Clock();
+const WALK = 4.0; // m/s
+function tick() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  let mx = move.x, my = move.y;
+  if (keys.KeyW) my -= 1; if (keys.KeyS) my += 1; if (keys.KeyA) mx -= 1; if (keys.KeyD) mx += 1;
+  const fwd = -my, right = mx;
+  const sin = Math.sin(yaw), cos = Math.cos(yaw);
+  camera.position.x += (right * cos - fwd * sin) * WALK * dt;
+  camera.position.z += (-right * sin - fwd * cos) * WALK * dt;
+  // 移動範囲：射撃位置の台の上だけ（標的側へは出られない）
+  camera.position.x = Math.max(-11, Math.min(11, camera.position.x));
+  camera.position.z = Math.max(-0.6, Math.min(6.5, camera.position.z));
+  camera.position.y = EYE_H + 0.2;
+  camera.rotation.set(pitch, yaw, 0);
+  posEl.textContent = `横 ${camera.position.x.toFixed(1)} m ／ 視線 ${((-yaw * 180 / Math.PI) % 360).toFixed(0)}°`;
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
