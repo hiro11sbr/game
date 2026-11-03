@@ -31,8 +31,14 @@
     border-radius: 8px; padding: 6px 10px; font-size: 12px; line-height: 1.5;
     backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
   }
-  #info { top: max(10px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); }
+  #leftcol { position: absolute; top: max(10px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+  #leftcol .panel { position: static; }
   #info b { color: var(--accent); font-weight: 600; }
+  #modeBtn {
+    pointer-events: auto; font: inherit; font-size: 12px; color: var(--hud-fg); background: transparent;
+    border: 1px solid var(--hud-line); border-radius: 6px; padding: 2px 8px;
+  }
+  #pos b { color: var(--accent); }
   #status {
     top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right));
     text-align: right; font-variant-numeric: tabular-nums;
@@ -42,10 +48,7 @@
   #mag { font-family: var(--num); }
   #wind { margin-top: 2px; font-variant-numeric: tabular-nums; }
   #windArrow { display: inline-block; color: var(--accent); font-weight: 700; transition: transform 0.4s; }
-  #shot {
-    top: calc(max(10px, env(safe-area-inset-top)) + 64px); left: max(10px, env(safe-area-inset-left));
-    font-variant-numeric: tabular-nums;
-  }
+  #shot { font-variant-numeric: tabular-nums; }
   #shot b { color: var(--accent); }
   #shot .row { font-family: var(--num); font-size: 12px; }
   #cross {
@@ -116,11 +119,13 @@
 <canvas id="scope" hidden></canvas>
 <div id="flash"></div>
 <div id="hud">
+  <div id="leftcol">
   <div id="info" class="panel">
-    <div><b>M110</b>　銃と発砲の演出</div>
+    <div><button id="modeBtn" type="button"><b id="modeName">射撃場</b> ⇄</button></div>
     <div id="pos">横 0.0 m</div>
   </div>
   <div id="shot" class="panel" hidden>—</div>
+  </div>
   <div id="status" class="panel">
     <div id="ammo">20<small> / 80</small></div>
     <button id="ammoBtn" type="button">弾道 <b id="ammoName">M110</b> ⇄</button>
@@ -240,6 +245,7 @@ function heightAt(x, z) {
   return h;
 }
 const hitables = [];
+const rangeProps = [];   // 射撃場だけに置く物（猟場では隠す）
 {
   const size = 8400, seg = 270;
   const geo = new THREE.PlaneGeometry(size, size, seg, seg);
@@ -324,13 +330,13 @@ function makeLabel(text) {
       board.position.set(x, y + 1.2 + h / 2, -d);
       board.lookAt(0, y + 1.2 + h / 2, 0);
       board.userData.kind = d + 'm看板'; board.userData.mat = 'wood';
-      scene.add(board); hitables.push(board);
+      scene.add(board); hitables.push(board); rangeProps.push(board);
       const p = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.2 + h / 2, 0.15), post);
-      p.position.set(x, y + (1.2 + h / 2) / 2, -d + 0.1); scene.add(p);
+      p.position.set(x, y + (1.2 + h / 2) / 2, -d + 0.1); scene.add(p); rangeProps.push(p);
     }
     const stake = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.4), new THREE.MeshLambertMaterial({ color: 0xd9d4c4 }));
     stake.position.set(0, heightAt(0, -d) + 0.3, -d); stake.userData.kind = d + 'm杭'; stake.userData.mat = 'concrete';
-    scene.add(stake); hitables.push(stake);
+    scene.add(stake); hitables.push(stake); rangeProps.push(stake);
   }
 }
 
@@ -346,9 +352,9 @@ const plates = [];
   for (const [d, w, h, round, rec] of list) {
     const x = 6, gy = heightAt(x, -d), top = gy + h + 1.0;
     const fw = w + 0.8;
-    for (const sx of [-1, 1]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.1, top + 0.1 - gy, 0.1), wood); p.position.set(x + sx * fw / 2, (top + 0.1 + gy) / 2, -d); scene.add(p); }
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(fw + 0.1, 0.1, 0.1), wood); bar.position.set(x, top + 0.1, -d); scene.add(bar);
-    const pivot = new THREE.Group(); pivot.position.set(x, top, -d); scene.add(pivot);
+    for (const sx of [-1, 1]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.1, top + 0.1 - gy, 0.1), wood); p.position.set(x + sx * fw / 2, (top + 0.1 + gy) / 2, -d); scene.add(p); rangeProps.push(p); }
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(fw + 0.1, 0.1, 0.1), wood); bar.position.set(x, top + 0.1, -d); scene.add(bar); rangeProps.push(bar);
+    const pivot = new THREE.Group(); pivot.position.set(x, top, -d); scene.add(pivot); rangeProps.push(pivot);
     for (const sx of [-1, 1]) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.25, 0.02), chainM); c.position.set(sx * w * 0.35, -0.125, 0); pivot.add(c); }
     const paint = new THREE.MeshStandardMaterial({ color: 0xe9e7e0, roughness: 0.7, metalness: 0.1 });
     const geo = round ? new THREE.CylinderGeometry(w / 2, w / 2, 0.012, 40).rotateX(Math.PI / 2) : new THREE.BoxGeometry(w, h, 0.012);
@@ -358,7 +364,152 @@ const plates = [];
     hitables.push(plate); plates.push(pivot);
     if (rec) {
       const lb = new THREE.Mesh(new THREE.PlaneGeometry(8, 3), new THREE.MeshBasicMaterial({ map: makeLabel(rec.replace('記録 ', '')), fog: true }));
-      lb.position.set(x + fw / 2 + 6, gy + 3, -d); lb.lookAt(0, gy + 3, 0); scene.add(lb);
+      lb.position.set(x + fw / 2 + 6, gy + 3, -d); lb.lookAt(0, gy + 3, 0); scene.add(lb); rangeProps.push(lb);
+    }
+  }
+}
+
+// =====================================================================
+//  ヒグマ（体長約2m・肩の高さ約1m。肩の盛り上がりが特徴）
+// =====================================================================
+const furTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+  g.fillStyle = '#808080'; g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 1800; i++) {            // 毛並みの細い筋
+    const x = Math.random() * 128, y = Math.random() * 128, l = 3 + Math.random() * 7, v = 90 + Math.random() * 90;
+    g.strokeStyle = `rgb(${v},${v},${v})`; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y); g.lineTo(x + (Math.random() - 0.5) * 2, y + l); g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 3); return t;
+})();
+const BEAR_MAT = {
+  body: new THREE.MeshStandardMaterial({ color: 0x4a3322, roughness: 1, metalness: 0, map: furTex }),
+  back: new THREE.MeshStandardMaterial({ color: 0x5c4129, roughness: 1, metalness: 0, map: furTex }),
+  dark: new THREE.MeshStandardMaterial({ color: 0x2b1e14, roughness: 1, metalness: 0, map: furTex }),
+  snout: new THREE.MeshStandardMaterial({ color: 0x6e5038, roughness: 1, metalness: 0, map: furTex }),
+  black: new THREE.MeshStandardMaterial({ color: 0x0c0a09, roughness: 0.5, metalness: 0 }),
+  zone: new THREE.MeshBasicMaterial({ visible: false }),
+};
+function blob(r, sx, sy, sz, mat, x, y, z, parent) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 18, 12), mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); parent.add(m); return m;
+}
+function buildBear() {
+  const g = new THREE.Group();          // 前が +z
+  const body = new THREE.Group(); g.add(body);
+  blob(1, 0.42, 0.4, 0.86, BEAR_MAT.body, 0, 0.7, 0, body);             // 胴
+  blob(1, 0.33, 0.24, 0.4, BEAR_MAT.back, 0, 0.98, 0.42, body);          // 肩の盛り上がり
+  blob(1, 0.4, 0.38, 0.46, BEAR_MAT.body, 0, 0.7, -0.48, body);          // 尻
+  blob(0.06, 1, 1, 1, BEAR_MAT.dark, 0, 0.82, -0.92, body);              // 短い尾
+  const head = new THREE.Group(); head.position.set(0, 0.86, 0.78); body.add(head);
+  blob(1, 0.28, 0.27, 0.34, BEAR_MAT.body, 0, -0.02, 0.1, head);         // 首
+  blob(1, 0.22, 0.21, 0.24, BEAR_MAT.body, 0, -0.02, 0.38, head);        // 頭
+  blob(1, 0.11, 0.1, 0.17, BEAR_MAT.snout, 0, -0.08, 0.6, head);         // 鼻づら
+  blob(0.045, 1, 0.8, 1, BEAR_MAT.black, 0, -0.06, 0.76, head);          // 鼻
+  for (const sx of [-1, 1]) {
+    blob(0.06, 1, 1, 0.6, BEAR_MAT.dark, sx * 0.14, 0.15, 0.32, head);     // 丸い耳
+    blob(0.022, 1, 1, 1, BEAR_MAT.black, sx * 0.1, 0.03, 0.55, head);     // 目
+  }
+  const legs = [];
+  for (const [sx, sz, front] of [[-1, 0.5, 1], [1, 0.5, 1], [-1, -0.52, 0], [1, -0.52, 0]]) {
+    const leg = new THREE.Group(); leg.position.set(sx * 0.24, 0.72, sz); body.add(leg);
+    const up = new THREE.Mesh(new THREE.CapsuleGeometry(front ? 0.14 : 0.15, 0.3, 4, 10), BEAR_MAT.body); up.position.y = -0.2; leg.add(up);
+    const lo = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.26, 4, 10), BEAR_MAT.dark); lo.position.y = -0.5; leg.add(lo);
+    blob(1, 0.13, 0.07, 0.19, BEAR_MAT.dark, 0, -0.68, 0.06, leg);        // 足先
+    legs.push({ g: leg, front, side: sx });
+  }
+  // 当たり判定（見えない）：急所＝心臓・肺（前脚の付け根のすぐ後ろ）、頭、胴
+  const zone = (name, r, sx, sy, sz, x, y, z, parent) => { const m = blob(r, sx, sy, sz, BEAR_MAT.zone, x, y, z, parent); m.userData.zone = name; return m; };
+  const zones = [
+    zone('vital', 0.24, 1, 1, 1.15, 0, 0.66, 0.36, body),
+    zone('head', 1, 0.2, 0.2, 0.24, 0, -0.02, 0.4, head),
+    zone('body', 1, 0.46, 0.44, 1.05, 0, 0.72, -0.05, body),
+    zone('body', 1, 0.3, 0.3, 0.38, 0, -0.02, 0.12, head),
+  ];
+  return { g, body, head, legs, zones };
+}
+const bears = [];
+let huntMode = false;
+const HUNT = { kills: 0, fled: 0, wounded: 0 };
+function spawnBear() {
+  const parts = buildBear();
+  const far = ammo.key === 'bmg';
+  const dist = far ? 400 + Math.random() * 1900 : 180 + Math.random() * 700;
+  const ang = (Math.random() - 0.5) * 0.7;
+  const x = Math.sin(ang) * dist, z = -Math.cos(ang) * dist;
+  parts.g.position.set(x, heightAt(x, z), z);
+  const b = { ...parts, state: 'graze', t: 2 + Math.random() * 5, speed: 0, heading: Math.random() * 6.28, target: null, phase: Math.random() * 6, alertAt: -1, fall: 0, deadT: 0, dieAt: -1, wounded: false };
+  parts.g.rotation.y = b.heading;
+  for (const zn of parts.zones) { zn.userData.bear = b; hitables.push(zn); }
+  scene.add(parts.g); bears.push(b);
+  return b;
+}
+function removeBear(b) {
+  scene.remove(b.g);
+  for (const zn of b.zones) { const i = hitables.indexOf(zn); if (i >= 0) hitables.splice(i, 1); }
+  bears.splice(bears.indexOf(b), 1);
+}
+function setHunt(on) {
+  huntMode = on;
+  for (const o of rangeProps) o.visible = !on;
+  document.getElementById('modeName').textContent = on ? '猟場（ヒグマ）' : '射撃場';
+  while (bears.length) removeBear(bears[0]);
+  if (on) for (let i = 0; i < 3; i++) spawnBear();
+}
+function startle(b, delay) {
+  if (b.state === 'dead' || b.state === 'dying') return;
+  if (b.alertAt < 0 || simNow + delay < b.alertAt) b.alertAt = simNow + delay;
+}
+function bearHit(b, zone) {
+  if (b.state === 'dead' || b.state === 'dying') return;
+  if (zone === 'head') { b.state = 'dying'; b.fall = 0; }
+  else if (zone === 'vital') { b.dieAt = simNow + 1.2 + Math.random() * 1.5; b.state = 'flee'; b.speed = 9; aimAway(b); }   // 急所でも少し走ってから倒れる
+  else { if (!b.wounded) HUNT.wounded++; b.wounded = true; b.state = 'flee'; aimAway(b); }
+}
+function aimAway(b) {
+  const p = b.g.position; b.heading = Math.atan2(p.x - camera.position.x, p.z - camera.position.z) + (Math.random() - 0.5) * 0.9;
+  b.fleeD = Math.hypot(p.x - camera.position.x, p.z - camera.position.z); b.fleeT = 0;
+}
+function updateBears(dt) {
+  for (let i = bears.length - 1; i >= 0; i--) {
+    const b = bears[i], p = b.g.position;
+    if (b.alertAt >= 0 && simNow >= b.alertAt && (b.state === 'graze' || b.state === 'walk')) { b.state = 'flee'; aimAway(b); b.alertAt = -1; }
+    if (b.dieAt >= 0 && simNow >= b.dieAt && b.state === 'flee') { b.state = 'dying'; b.fall = 0; b.dieAt = -1; }
+    let targetSpeed = 0, lean = 0;
+    if (b.state === 'graze') {
+      b.t -= dt; if (b.t <= 0) { b.state = 'walk'; b.t = 4 + Math.random() * 8; b.heading += (Math.random() - 0.5) * 2.2; }
+    } else if (b.state === 'walk') {
+      targetSpeed = 1.3; b.t -= dt;
+      b.heading += Math.sin(simNow * 0.3 + i) * 0.15 * dt;
+      if (b.t <= 0) { b.state = 'graze'; b.t = 3 + Math.random() * 6; }
+    } else if (b.state === 'flee') {
+      targetSpeed = b.wounded ? 7 : 11; lean = 0.08;
+      const d = Math.hypot(p.x - camera.position.x, p.z - camera.position.z);
+      b.fleeT += dt;
+      if (d > b.fleeD + 450 || b.fleeT > 40) { HUNT.fled++; removeBear(b); spawnBear(); continue; }   // 林の向こうへ消えた
+    } else if (b.state === 'dying') {
+      b.fall = Math.min(1, b.fall + dt / 0.9);
+      b.body.rotation.z = b.fall * 1.45; b.body.position.y = -b.fall * 0.25;
+      if (b.fall >= 1) { b.state = 'dead'; b.deadT = 25; HUNT.kills++; }
+    } else if (b.state === 'dead') {
+      b.deadT -= dt; if (b.deadT <= 0) { removeBear(b); spawnBear(); continue; }
+    }
+    b.speed += (targetSpeed - b.speed) * Math.min(1, dt * 2.5);
+    p.x += Math.sin(b.heading) * b.speed * dt; p.z += Math.cos(b.heading) * b.speed * dt;
+    p.y = heightAt(p.x, p.z);
+    const dy = b.heading - b.g.rotation.y; b.g.rotation.y += Math.atan2(Math.sin(dy), Math.cos(dy)) * Math.min(1, dt * 3);
+    // 歩き方：対角の脚が交互に出る。速いほど大きく速く
+    const moving = b.state !== 'dying' && b.state !== 'dead';
+    const freq = 1.6 + b.speed * 0.55, amp = Math.min(0.9, 0.12 + b.speed * 0.09);
+    if (moving) b.phase += dt * freq * Math.PI * 2 * (b.speed > 0.05 ? 1 : 0);
+    for (const L of b.legs) {
+      const ph = b.phase + (L.front ? 0 : Math.PI) + (L.side > 0 ? Math.PI : 0);
+      L.g.rotation.x = moving ? Math.sin(ph) * amp * (b.speed > 0.05 ? 1 : 0) : L.g.rotation.x * 0.9;
+    }
+    if (moving) {
+      b.body.position.y = Math.abs(Math.sin(b.phase)) * 0.03 * Math.min(1, b.speed);
+      b.body.rotation.x = -lean + Math.sin(b.phase * 2) * 0.02 * Math.min(1, b.speed / 3);
+      const down = b.state === 'graze' ? 0.55 + Math.sin(simNow * 1.7 + i) * 0.08 : 0.05;   // 草を食むときは頭を下げる
+      b.head.rotation.x += (down - b.head.rotation.x) * Math.min(1, dt * 3);
+      b.head.rotation.y = b.state === 'graze' ? Math.sin(simNow * 0.6 + i * 2) * 0.3 : 0;
     }
   }
 }
@@ -724,6 +875,7 @@ function rangefind() {
   lrfValEl.innerHTML = h ? `<b>${h.distance.toFixed(0)}</b> m` : '— m';
 }
 bindBtn(document.getElementById('lrf'), rangefind, false);
+bindBtn(document.getElementById('modeBtn'), () => setHunt(!huntMode), false);
 bindBtn(document.getElementById('ammoBtn'), () => { setAmmo(ammo.key === 'm118' ? 'bmg' : 'm118'); dial.e = dial.w = 0; showDial(); }, false);
 
 function setZoom(z) {
@@ -835,6 +987,7 @@ function buildAudio() {
       for (const [f, gg, dd] of [[1180, 0.5, 0.9], [2650, 0.35, 0.6], [4170 * muff + 900, 0.2, 0.35]]) tone(t, 'sine', f, f * 0.996, dd, gg * g, null, 0.5);
       nz(t, 0.02, 0.4 * g, 'highpass', 2500 * muff, 2500 * muff, 0.7);
     } else if (mat === 'wood') { nz(t, 0.06, 0.6 * g, 'bandpass', 700, 500, 2, null, 0.3); tone(t, 'triangle', 320, 200, 0.08, 0.3 * g); }
+    else if (mat === 'bear') { nz(t, 0.09, 0.8 * g, 'lowpass', 380, 160, 1, null, 0.3); tone(t, 'sine', 120, 60, 0.12, 0.5 * g); }
     else if (mat === 'concrete') { nz(t, 0.05, 0.6 * g, 'bandpass', 1600 * muff, 900, 1.5, null, 0.3); }
     else { nz(t, 0.16, 0.45 * g, 'lowpass', 900 * muff, 250, 0.7, null, 0.4); }
   };
@@ -1056,8 +1209,9 @@ function launchBullet() {
     sd: 0.0254 * 1.25 * (ammo.sg + 1.2), mass: ammo.mass });
 }
 const downRay = new THREE.Raycaster();
+function shown(o) { for (let q = o; q; q = q.parent) if (!q.visible && !q.userData.zone) return false; return true; }
 function updateBullets(dt) {
-  const objs = hitables.filter(o => o.name !== 'ground');
+  const objs = hitables.filter(o => o.name !== 'ground' && shown(o));
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
     const n = Math.max(1, Math.ceil(dt / 0.001)), h = dt / n;
@@ -1082,8 +1236,15 @@ function updateBullets(dt) {
     let hit = null;
     if (len > 0) {
       ray.set(segA, segD.clone().normalize()); ray.near = 0; ray.far = len + 0.01;
-      const h0 = ray.intersectObjects(objs, false)[0];
-      if (h0) hit = { point: h0.point, obj: h0.object, normal: h0.face.normal.clone().transformDirection(h0.object.matrixWorld), dir: ray.ray.direction.clone() };
+      const all = ray.intersectObjects(objs, false), h0 = all[0];
+      if (h0) {
+        hit = { point: h0.point, obj: h0.object, normal: h0.face.normal.clone().transformDirection(h0.object.matrixWorld), dir: ray.ray.direction.clone() };
+        const bz = h0.object.userData.bear;
+        if (bz) {   // 同じクマの中で、弾が通った一番重要な部位で判定（急所＞頭＞胴）
+          const zs = all.filter(x => x.object.userData.bear === bz).map(x => x.object.userData.zone);
+          hit.zone = zs.includes('vital') ? 'vital' : zs.includes('head') ? 'head' : 'body'; hit.bear = bz;
+        }
+      }
     }
     if (!hit && groundHit) {
       // 表示中の地面（多角形）に正確に合わせる
@@ -1190,6 +1351,10 @@ function impactFx(hit, mat, energyKJ, range) {
     for (let i = 0; i < 26 * big; i++) emitP(sparkPool, P.clone(), scatter(N, rnd(4, 14), rnd(-0.5, 3)), rnd(0.18, 0.55), 0.025, 3, 0xffc870, 9.8, 1.2);
     for (let i = 0; i < 3; i++) emitSmoke(P.clone().addScaledVector(N, 0.1), scatter(N, 0.8, 0.6).add(new THREE.Vector3(0, 0.3, 0)), 1.6, 0.15, 1.0 * big, 0.45, 0x8a8a88);
     const pv = hit.obj.userData.pivot; if (pv) pv.userData.v += 1.6 * big * Math.sign(hit.dir.z || -1) * -1;
+  } else if (mat === 'bear') {
+    for (let i = 0; i < 4; i++) emitSmoke(P.clone(), scatter(N, 0.4, 0.5), 0.9, 0.08, 0.45, 0.35, 0x5a4535);   // 毛と土ぼこりが舞う
+    sfx.impact?.(range / BALL.sound, 'bear', range);
+    return;
   } else if (mat === 'wood') {
     for (let i = 0; i < 14 * big; i++) emitP(chipPool, P.clone(), scatter(N, rnd(1, 4), rnd(1.5, 5)), rnd(0.6, 1.2), 0.03, 2.2, 0xd8b884, 9.8, 0.4);
     for (let i = 0; i < 3; i++) emitSmoke(P.clone(), scatter(N, 0.5, 0.8), 1.4, 0.1, 0.7 * big, 0.4, 0xcdb894);
@@ -1210,8 +1375,14 @@ function reportImpact(b, hit) {
   const range = Math.hypot(hit.point.x - b.o.x, hit.point.z - b.o.z);
   const milV = Math.atan2(up, fwd) * 1000, milH = Math.atan2(rt, fwd) * 1000;
   const v = Math.hypot(b.v[0], b.v[1], b.v[2]), J = 0.5 * b.mass * v * v;
-  const mat = hit.obj.userData.mat || 'dirt', what = hit.obj.userData.kind || '標的';
+  let mat = hit.obj.userData.mat || 'dirt', what = hit.obj.userData.kind || '標的';
+  if (hit.bear) {
+    mat = 'bear';
+    what = hit.zone === 'vital' ? '<b>ヒグマ・急所（心臓・肺）</b>' : hit.zone === 'head' ? '<b>ヒグマ・頭</b>' : 'ヒグマ・胴（手負い）';
+    bearHit(hit.bear, hit.zone);
+  }
   impactFx(hit, mat, J / 1000, range);
+  for (const bb of bears) if (bb !== hit.bear && bb.g.position.distanceTo(hit.point) < 25) startle(bb, 0);   // 近くに着弾すると驚いて逃げる
   const sg = x => (x >= 0 ? '+' : '−') + Math.abs(x);
   shotEl.hidden = false;
   shotEl.innerHTML =
@@ -1244,6 +1415,10 @@ function fire() {
 
   launchBullet();
   sfx.shot?.(ammo.boom);
+  for (const bb of bears) {   // 銃声は音速で届く。近いほど逃げやすい
+    const d = bb.g.position.distanceTo(camera.position);
+    if (Math.random() < (d < 400 ? 0.75 : d < 1000 ? 0.4 : 0.15)) startle(bb, d / BALL.sound);
+  }
   sfx.brass?.(0.48 + Math.random() * 0.12);
   try { navigator.vibrate?.([35, 20, 18]); } catch {}
 
@@ -1443,7 +1618,20 @@ function tick() {
     if (k >= 1) { scene.remove(p.sp); p.sp.material.dispose(); puffs.splice(i, 1); }
   }
 
-  posEl.textContent = `横 ${camera.position.x.toFixed(1)} m ／ 視線 ${((-yaw * 180 / Math.PI) % 360).toFixed(0)}°`;
+  if (!frozen) updateBears(dt);
+  if (huntMode) {
+    // 観測手：一番近い生きているヒグマの方向と距離
+    let best = null, bd = 1e9;
+    for (const bb of bears) { if (bb.state === 'dead' || bb.state === 'dying') continue; const d = bb.g.position.distanceTo(camera.position); if (d < bd) { bd = d; best = bb; } }
+    let txt = `仕留め <b>${HUNT.kills}</b>・手負い ${HUNT.wounded}・逃走 ${HUNT.fled}`;
+    if (best) {
+      const bp = best.g.position, br = Math.atan2(-(bp.x - camera.position.x), -(bp.z - camera.position.z));
+      let rel = br - (yaw + S.ry); rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+      const deg = Math.round(rel * 180 / Math.PI), st = best.state === 'flee' ? '逃走中' : best.state === 'walk' ? '歩行中' : '採食中';
+      txt += `<br>観測手：${Math.abs(deg) <= 1 ? '正面' : (deg > 0 ? '左 ' : '右 ') + Math.abs(deg) + '°'}・約${Math.round(bd / 10) * 10} m（${st}）`;
+    }
+    posEl.innerHTML = txt;
+  } else posEl.textContent = `横 ${camera.position.x.toFixed(1)} m ／ 視線 ${((-yaw * 180 / Math.PI) % 360).toFixed(0)}°`;
 
   // 描画
   camera.updateMatrixWorld();
@@ -1469,5 +1657,5 @@ addEventListener('resize', () => {
 });
 
 // テスト用の入口
-window.__game = { fire, toggleAim, setZoom, reload, S, gun, HIP, camera, puffs, dial, setAmmo, rangefind, plates, decals, get ammo() { return ammo; }, bullets, trails, smoke, wind, ZERO_ANGLE, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, get pitch() { return pitch; }, set pitch(v) { pitch = v; } };
+window.__game = { bears, setHunt, HUNT, fire, toggleAim, setZoom, reload, S, gun, HIP, camera, puffs, dial, setAmmo, rangefind, plates, decals, get ammo() { return ammo; }, bullets, trails, smoke, wind, ZERO_ANGLE, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, get pitch() { return pitch; }, set pitch(v) { pitch = v; } };
 </script>
