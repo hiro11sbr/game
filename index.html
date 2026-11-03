@@ -138,7 +138,7 @@
   </div>
   <div id="status" class="panel">
     <div id="ammo">20<small> / 80</small></div>
-    <button id="ammoBtn" type="button">弾道 <b id="ammoName">M110</b> ⇄</button>
+    <button id="ammoBtn" type="button">武器 <b id="ammoName">M110</b> ⇄</button>
     <div id="mag">7.62×51 M118LR</div>
     <div id="wind"><span id="windArrow">↑</span> <span id="windTxt">風 —</span></div>
   </div>
@@ -440,7 +440,7 @@ let huntMode = false;
 const HUNT = { kills: 0, fled: 0, wounded: 0 };
 function spawnBear() {
   const parts = buildBear();
-  const far = ammo.key === 'bmg';
+  const far = ammo.key !== 'm118';
   const dist = far ? 400 + Math.random() * 1900 : 180 + Math.random() * 700;
   const ang = (Math.random() - 0.5) * 0.7;
   const x = Math.sin(ang) * dist, z = -Math.cos(ang) * dist;
@@ -658,21 +658,109 @@ function buildM110() {
   // 弾倉に入った弾（上から見える真鍮）
   add(new THREE.CylinderGeometry(0.006, 0.006, 0.05, 10), new THREE.MeshStandardMaterial({ color: 0xb48a4a, metalness: 1, roughness: 0.3 }), 0.004, -0.058, -0.08, Math.PI / 2, 0, 0, mag);
 
-  // ---- 発射炎（消炎器から4方向に割れる炎＋中心の光）
+  const fx = addMuzzleFx(g, MUZZLE_Z, 1, false);
+  g.userData = { ...fx, cover, mag, magRing,
+    muzzle: new THREE.Vector3(0, BORE_Y, MUZZLE_Z), port: new THREE.Vector3(0.03, 0.055, 0.0), shellScale: 1,
+    hip: { pos: new THREE.Vector3(0.2, -0.19, -0.62), rot: new THREE.Euler(0.02, 0.05, 0.0) },
+    aim: { pos: new THREE.Vector3(0.0, -0.132, -0.22), rot: new THREE.Euler(0, 0, 0) } };
+  return g;
+}
+// 発射炎（消炎器から割れる炎＋中心の光）。brake=true は横へ吹き出す大型の制退器
+function addMuzzleFx(g, muzzleZ, sc, brake) {
   const fl = makeFlashTex();
-  const flash = new THREE.Group(); flash.position.set(0, BORE_Y, MUZZLE_Z); g.add(flash);
+  const flash = new THREE.Group(); flash.position.set(0, BORE_Y, muzzleZ); g.add(flash);
   const flashMat = new THREE.MeshBasicMaterial({ map: fl.side, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false, opacity: 0 });
   for (let i = 0; i < 3; i++) {
-    const pl = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 0.2), flashMat);
-    pl.rotation.set(-Math.PI / 2, 0, 0); pl.rotateY(i * Math.PI / 3); pl.position.z = -0.095; flash.add(pl);
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(0.11 * sc, 0.2 * sc), flashMat);
+    pl.rotation.set(-Math.PI / 2, 0, 0); pl.rotateY(i * Math.PI / 3); pl.position.z = -0.095 * sc; flash.add(pl);
+  }
+  if (brake) for (const sx of [-1, 1]) for (const zz of [0.05, 0.11]) {   // 制退器の横穴から真横へ噴く炎
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(0.16 * sc, 0.34 * sc), flashMat);
+    pl.rotation.set(0, 0, -sx * Math.PI / 2); pl.position.set(sx * 0.17 * sc, 0, zz); flash.add(pl);
   }
   const starMat = new THREE.MeshBasicMaterial({ map: fl.star, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false, opacity: 0 });
-  const star = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.16), starMat); star.position.z = -0.03; flash.add(star);
+  const star = new THREE.Mesh(new THREE.PlaneGeometry(0.16 * sc, 0.16 * sc), starMat); star.position.z = -0.03; flash.add(star);
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: fl.glow, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, opacity: 0 }));
-  glow.scale.setScalar(0.22); glow.position.z = -0.04; flash.add(glow);
-  const gunLight = new THREE.PointLight(0xffa04a, 0, 2.5, 2); gunLight.position.set(0, BORE_Y + 0.02, MUZZLE_Z + 0.05); g.add(gunLight);
+  glow.scale.setScalar(0.22 * sc); glow.position.z = -0.04; flash.add(glow);
+  const gunLight = new THREE.PointLight(0xffa04a, 0, 2.5 * sc, 2); gunLight.position.set(0, BORE_Y + 0.02, muzzleZ + 0.05); g.add(gunLight);
+  return { flash, flashMat, starMat, star, glow, gunLight, glowBase: 0.18 * sc };
+}
 
-  g.userData = { flash, flashMat, starMat, star, glow, gunLight, cover, mag, magRing };
+// =====================================================================
+//  PX-20「ハンマー」：架空の20mm対物ライフル（実在しない独自デザイン）
+//  ブルパップ式（弾倉が握りの後ろ）・角型の大型制退器・5発・炸裂弾
+// =====================================================================
+const PX_MUZZLE_Z = -1.2;
+function buildPX20() {
+  const g = new THREE.Group();
+  const rough = noiseTex(64, 140, 210, 11);
+  const body = new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.55, metalness: 0.5, roughnessMap: rough, envMapIntensity: 0.8 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.6, metalness: 0.6, envMapIntensity: 0.8 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x3b3f44, roughness: 0.35, metalness: 0.85, envMapIntensity: 1.0 });
+  const accent = new THREE.MeshStandardMaterial({ color: 0xe8792a, roughness: 0.5, metalness: 0.2, emissive: 0x3a1500 });
+  const rubber = new THREE.MeshStandardMaterial({ color: 0x101112, roughness: 0.95 });
+  const hole = new THREE.MeshBasicMaterial({ color: 0x050505 });
+  const lens = new THREE.MeshStandardMaterial({ color: 0x2a0f2a, roughness: 0.02, metalness: 1.0, envMapIntensity: 2.2 });
+  const add = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0, parent = g) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); parent.add(m); return m; };
+  const rbox = (w, h, d, r, mat, x, y, z, rx = 0, parent = g) => add(new RoundedBoxGeometry(w, h, d, 2, r), mat, x, y, z, rx, 0, 0, parent);
+  const cylZ = (r1, r2, len, mat, x, y, z, seg = 24, parent = g) => add(new THREE.CylinderGeometry(r1, r2, len, seg), mat, x, y, z, Math.PI / 2, 0, 0, parent);
+  const extrude = (pts, width, mat, bevel = 0.004, parent = g) => {
+    const sh = new THREE.Shape(); sh.moveTo(-pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) sh.lineTo(-pts[i][0], pts[i][1]);
+    const geo = new THREE.ExtrudeGeometry(sh, { depth: width - bevel * 2, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2 });
+    geo.translate(0, 0, -(width - bevel * 2) / 2); geo.rotateY(Math.PI / 2);
+    const m = new THREE.Mesh(geo, mat); parent.add(m); return m;
+  };
+  // 本体（機関部を肩側に収めたブルパップ）
+  extrude([[0.36, 0.075], [-0.3, 0.075], [-0.34, 0.05], [-0.34, -0.03], [-0.16, -0.045], [0.1, -0.045], [0.2, -0.11], [0.36, -0.12]], 0.07, body, 0.006);
+  rbox(0.074, 0.012, 0.5, 0.004, accent, 0, 0.02, 0.0);                          // 側面のオレンジの帯
+  rbox(0.06, 0.04, 0.2, 0.012, rubber, 0, 0.1, 0.24);                            // 頬当て
+  rbox(0.078, 0.2, 0.025, 0.006, rubber, 0, -0.02, 0.37);                        // 床尾パッド
+  rbox(0.02, 0.09, 0.02, 0.004, steel, 0, -0.16, 0.3);                           // 後ろの一脚（たたんだ状態）
+  // 握りと用心金
+  extrude([[-0.1, -0.04], [-0.06, -0.04], [-0.02, -0.17], [-0.03, -0.182], [-0.06, -0.185], [-0.075, -0.14], [-0.09, -0.08]], 0.036, rubber, 0.005);
+  rbox(0.016, 0.006, 0.1, 0.002, body, 0, -0.085, -0.16);
+  rbox(0.016, 0.04, 0.008, 0.002, body, 0, -0.065, -0.21);
+  // 弾倉（20mm×5発。握りの後ろ）
+  const mag = new THREE.Group(); g.add(mag);
+  rbox(0.05, 0.17, 0.12, 0.006, dark, 0, -0.12, 0.09, 0, mag);
+  rbox(0.054, 0.014, 0.124, 0.004, accent, 0, -0.205, 0.09, 0, mag);
+  // ハンドガード（放熱穴）
+  rbox(0.072, 0.07, 0.3, 0.012, body, 0, 0.035, -0.47);
+  for (let i = 0; i < 5; i++) for (const sx of [-1, 1]) add(new THREE.CapsuleGeometry(0.008, 0.03, 3, 8), hole, sx * 0.0365, 0.035, -0.37 - i * 0.05, Math.PI / 2, 0, 0);
+  // 上面レール
+  rbox(0.024, 0.01, 0.82, 0.002, dark, 0, 0.083, -0.15);
+  const notch = new THREE.InstancedMesh(new THREE.BoxGeometry(0.025, 0.005, 0.006), dark, 80);
+  const mm = new THREE.Matrix4(); for (let i = 0; i < 80; i++) { mm.makeTranslation(0, 0.09, 0.25 - i * 0.01); notch.setMatrixAt(i, mm); } g.add(notch);
+  // 太い溝付き銃身
+  cylZ(0.022, 0.02, 0.45, steel, 0, BORE_Y, -0.84, 28);
+  for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; rbox(0.006, 0.006, 0.36, 0.002, dark, Math.cos(a) * 0.0205, BORE_Y + Math.sin(a) * 0.0205, -0.84); }
+  // 角型の大型制退器（横穴3対）
+  rbox(0.095, 0.07, 0.15, 0.01, dark, 0, BORE_Y, -1.13);
+  for (let i = 0; i < 3; i++) for (const sx of [-1, 1]) rbox(0.004, 0.04, 0.026, 0.001, hole, sx * 0.048, BORE_Y, -1.08 - i * 0.04);
+  add(new THREE.CircleGeometry(0.016, 16), hole, 0, BORE_Y, PX_MUZZLE_Z + 0.004, 0, Math.PI, 0);
+  // 二脚（たたんだ状態）
+  rbox(0.04, 0.02, 0.04, 0.006, steel, 0, -0.01, -0.6);
+  for (const sx of [-1, 1]) cylZ(0.007, 0.007, 0.3, steel, sx * 0.016, -0.02, -0.46, 8);
+  // 大型スコープ（5-25倍・対物56mm）
+  const sy = 0.132;
+  for (const rz of [-0.02, -0.2]) { rbox(0.03, 0.03, 0.024, 0.004, dark, 0, 0.1, rz); add(new THREE.TorusGeometry(0.0185, 0.0045, 8, 24), dark, 0, sy, rz); }
+  cylZ(0.017, 0.017, 0.32, dark, 0, sy, -0.12, 28);
+  cylZ(0.017, 0.034, 0.07, dark, 0, sy, -0.315, 28);
+  cylZ(0.034, 0.034, 0.08, dark, 0, sy, -0.39, 28);
+  add(new THREE.CircleGeometry(0.03, 28), lens, 0, sy, -0.431, 0, Math.PI, 0);
+  cylZ(0.017, 0.022, 0.04, dark, 0, sy, 0.06, 28);
+  cylZ(0.023, 0.023, 0.07, dark, 0, sy, 0.11, 28);
+  add(new THREE.CircleGeometry(0.019, 24), lens, 0, sy, 0.146);
+  rbox(0.036, 0.034, 0.06, 0.008, dark, 0, sy, -0.12);
+  const tE = add(new THREE.CylinderGeometry(0.02, 0.02, 0.036, 28), dark, 0, sy + 0.035, -0.12);
+  add(new THREE.CylinderGeometry(0.02, 0.02, 0.008, 28), accent, 0, sy + 0.054, -0.12);
+  add(new THREE.CylinderGeometry(0.017, 0.017, 0.03, 28), dark, 0.032, sy, -0.12, 0, 0, Math.PI / 2);
+  const fx = addMuzzleFx(g, PX_MUZZLE_Z, 2.2, true);
+  g.userData = { ...fx, cover: new THREE.Group(), mag, magRing: tE,
+    muzzle: new THREE.Vector3(0, BORE_Y, PX_MUZZLE_Z), port: new THREE.Vector3(0.04, 0.06, 0.2), shellScale: 2.6,
+    hip: { pos: new THREE.Vector3(0.24, -0.2, -0.72), rot: new THREE.Euler(0.02, 0.06, 0.0) },
+    aim: { pos: new THREE.Vector3(0.0, -0.132, -0.24), rot: new THREE.Euler(0, 0, 0) } };
   return g;
 }
 function makeFlashTex() {
@@ -713,10 +801,15 @@ const gunCam = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.01, 1
 gunScene.add(new THREE.HemisphereLight(0xdfeaf5, 0x4a5530, 0.5));
 const gunSun = new THREE.DirectionalLight(0xfff1d6, 2.4); gunSun.position.set(-1, 2, 1.5); gunScene.add(gunSun);
 const gunRim = new THREE.DirectionalLight(0xbfd2e6, 1.2); gunRim.position.set(1.5, 0.6, -1.5); gunScene.add(gunRim);
-const gun = buildM110();
+const GUNS = { m110: buildM110(), px20: buildPX20() };
+let gun = GUNS.m110;
 gunScene.add(gun);
-const HIP = { pos: new THREE.Vector3(0.2, -0.19, -0.62), rot: new THREE.Euler(0.02, 0.05, 0.0) };
-const AIM = { pos: new THREE.Vector3(0.0, -0.132, -0.22), rot: new THREE.Euler(0, 0, 0) };
+let HIP = gun.userData.hip, AIM = gun.userData.aim;
+function setGunModel(key) {
+  if (gun === GUNS[key]) return;
+  gunScene.remove(gun); gun = GUNS[key]; gunScene.add(gun);
+  HIP = gun.userData.hip; AIM = gun.userData.aim;
+}
 
 // 空薬莢（排莢口から右へ飛ぶ）
 const brassMat = new THREE.MeshStandardMaterial({ color: 0xc09050, metalness: 1, roughness: 0.28, envMapIntensity: 1.4 });
@@ -905,7 +998,22 @@ function rangefind() {
 }
 bindBtn(document.getElementById('lrf'), rangefind, false);
 bindBtn(document.getElementById('modeBtn'), () => setHunt(!huntMode), false);
-bindBtn(document.getElementById('ammoBtn'), () => { setAmmo(ammo.key === 'm118' ? 'bmg' : 'm118'); dial.e = dial.w = 0; showDial(); }, false);
+// 武器の切り替え：M110 → M110＋TAC-50弾道 → PX-20（架空）
+const WEAPONS = [
+  { label: 'M110', ammo: 'm118', model: 'm110', mag: 20, reserve: 80 },
+  { label: 'TAC-50弾道', ammo: 'bmg', model: 'm110', mag: 20, reserve: 80 },
+  { label: 'PX-20（架空）', ammo: 'px', model: 'px20', mag: 5, reserve: 30 },
+];
+let weaponIdx = 0, weapon = WEAPONS[0];
+function setWeapon(i) {
+  if (S.aiming) toggleAim();
+  weaponIdx = i; weapon = WEAPONS[i];
+  setAmmo(weapon.ammo); setGunModel(weapon.model);
+  S.mag = weapon.mag; S.reserve = weapon.reserve; S.reloading = 0; S.boltLocked = false; updateAmmo();
+  dial.e = dial.w = 0; showDial();
+  document.getElementById('ammoName').textContent = weapon.label;
+}
+bindBtn(document.getElementById('ammoBtn'), () => setWeapon((weaponIdx + 1) % WEAPONS.length), false);
 
 function setZoom(z) {
   zoom = Math.max(ammo.zoomMin, Math.min(ammo.zoomMax, Math.round(z * 10) / 10)); drawScope(); drawZoomGauge?.();
@@ -918,7 +1026,7 @@ function toggleAim() {
 }
 // リロード：弾倉を抜く→新しい弾倉を差す→（弾切れ時は）ボルトを戻す
 function reload() {
-  if (S.reloading > 0 || S.mag === M110.magSize || S.reserve === 0) return;
+  if (S.reloading > 0 || S.mag === weapon.mag || S.reserve === 0) return;
   if (S.aiming) toggleAim();
   S.reloadLen = S.reloading = S.boltLocked ? 3.0 : 2.4;
   sfx.magOut?.(0.45); sfx.magIn?.(1.55);
@@ -984,7 +1092,7 @@ function buildAudio() {
   const ping = (t, freqs, gain, dur) => { for (const f of freqs) tone(t, 'sine', f, f * 0.995, dur * (0.6 + Math.random() * 0.6), gain); };
 
   sfx.shot = (boom = 1) => {
-    const t = A.currentTime + 0.005, L = boom > 1.2 ? 1.6 : 1;
+    const t = A.currentTime + 0.005, L = boom > 2 ? 2.3 : boom > 1.2 ? 1.6 : 1;
     nz(t, 0.035 * L, 1.0, 'highpass', 1800 / L, 1800 / L, 0.7, null, 0.9, 0.05);   // 衝撃波の「パン」
     nz(t, 0.5 * L, 1.0, 'lowpass', 7000, 220 / L, 0.8, null, 1.3 * L, 0);           // 発射ガスの爆風
     nz(t + 0.004, 0.22 * L, 0.7, 'bandpass', 900 / L, 300 / L, 1.2, null, 0.6, 0);   // 胴鳴り
@@ -1001,6 +1109,12 @@ function buildAudio() {
     ping(t + 0.13, [4150, 6420, 9050], 0.035, 0.1);
     ping(t + 0.22, [4150, 6420], 0.018, 0.07);
     nz(t + 0.3, 0.05, 0.02, 'bandpass', 5000, 5000, 3);
+  };
+  sfx.explode = (delay, range) => {                          // 炸裂音：遠いほど低くこもって遅れて届く
+    const t = A.currentTime + delay, g = Math.max(0.12, Math.min(1, 400 / Math.max(range, 1))), muff = Math.max(0.2, Math.min(1, 700 / Math.max(range, 1)));
+    nz(t, 1.6, 1.0 * g, 'lowpass', 2400 * muff, 70, 0.7, null, 1.6);
+    nz(t, 0.08, 0.8 * g, 'highpass', 900 * muff + 200, 900 * muff + 200, 0.7, null, 0.6);
+    tone(t, 'sine', 62, 24, 1.3, 1.0 * g, shaper, 0.6);
   };
   sfx.click = () => { const t = A.currentTime; nz(t, 0.012, 0.18, 'bandpass', 4200, 4200, 8); };
   sfx.dry = () => { const t = A.currentTime; nz(t, 0.02, 0.3, 'bandpass', 2600, 2600, 6); };
@@ -1079,6 +1193,8 @@ const AMMO = {
   m118: { key: 'm118', short: 'M110', name: '7.62×51 M118LR', v0: 783, bcG7: 0.25, mass: 0.01134, sightH: 0.065, sg: 1.7, zoomMin: 3.5, zoomMax: 10, recoil: 1, boom: 1 },
   // TAC-50：.50 BMG Hornady 750gr A-MAX、初速823m/s。G7弾道係数0.50は推定値
   bmg: { key: 'bmg', short: 'TAC-50', name: '.50 BMG 750gr A-MAX', v0: 823, bcG7: 0.50, mass: 0.0486, sightH: 0.07, sg: 1.6, zoomMin: 5.5, zoomMax: 22, recoil: 1.6, boom: 1.6 },
+  // 架空：PX-20 の20mm炸裂弾。初速1150m/s・125g（ゲーム用の設定値）
+  px: { key: 'px', short: 'PX-20', name: '20mm 炸裂弾（架空）', v0: 1150, bcG7: 0.62, mass: 0.125, sightH: 0.075, sg: 1.8, zoomMin: 5, zoomMax: 25, recoil: 2.4, boom: 2.6, explosive: true },
 };
 let ammo = AMMO.m118, KDRAG = 0, ZERO_ANGLE = 0;
 // 地球の自転（コリオリの力）：北緯36°で真北へ撃つ想定
@@ -1114,7 +1230,6 @@ function setAmmo(key) {
   ammo = AMMO[key];
   KDRAG = BALL.rho * Math.PI / (8 * ammo.bcG7 * 703.0696);
   ZERO_ANGLE = computeZero();
-  document.getElementById('ammoName').textContent = ammo.short;
   document.getElementById('mag').textContent = ammo.name;
   setZoom(zoom);
 }
@@ -1234,7 +1349,7 @@ function launchBullet() {
   const tr = makeTrail(); trails.push(tr);
   tr.pts.push({ p: o.clone().addScaledVector(dir, 0.8), t: simNow, d: 0.8 });
   bullets.push({ p: [o.x, o.y, o.z], v: [dir.x * v0, dir.y * v0, dir.z * v0], t: 0, o, eye: camera.position.clone(), f, u, r, tr, dist: 0,
-    sd: 0.0254 * 1.25 * (ammo.sg + 1.2), mass: ammo.mass });
+    sd: 0.0254 * 1.25 * (ammo.sg + 1.2), mass: ammo.mass, ex: !!ammo.explosive });
 }
 const downRay = new THREE.Raycaster();
 function shown(o) { for (let q = o; q; q = q.parent) if (!q.visible && !q.userData.zone) return false; return true; }
@@ -1397,6 +1512,34 @@ function impactFx(hit, mat, energyKJ, range) {
   addDecal(hit, mat, mat === 'dirt' ? big : 1);
   sfx.impact?.(range / BALL.sound, mat, range);
 }
+// 炸裂：火の玉・衝撃波の輪・破片・黒煙
+const rings = [];
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xfff1d8, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+function explode(hit, range) {
+  const P = hit.point.clone().addScaledVector(hit.normal, 0.3), N = hit.normal;
+  emitP(sparkPool, P, new THREE.Vector3(), 0.1, 5, 60, 0xffffff, 0, 0, 1);
+  for (let i = 0; i < 10; i++) emitP(sparkPool, P.clone().add(new THREE.Vector3(rnd(-1, 1), rnd(0, 1.5), rnd(-1, 1))),
+    new THREE.Vector3(rnd(-3, 3), rnd(2, 6), rnd(-3, 3)), rnd(0.25, 0.55), rnd(1.6, 3.2), 26, i % 2 ? 0xff9a3a : 0xffc060, -3, 2.5, 0.9);
+  for (let i = 0; i < 30; i++) emitP(sparkPool, P.clone(), scatter(N, rnd(8, 26), rnd(4, 18)), rnd(0.4, 1.0), 0.06, 3, 0xffb050, 9.8, 0.6);
+  for (let i = 0; i < 40; i++) emitP(chipPool, P.clone(), scatter(N, rnd(4, 18), rnd(4, 16)), rnd(0.8, 1.8), 0.08, 2.5, 0x3a2e22, 9.8, 0.3);
+  for (let i = 0; i < 8; i++) emitSmoke(P.clone().add(new THREE.Vector3(rnd(-1, 1), rnd(0, 1), rnd(-1, 1))),
+    new THREE.Vector3(rnd(-1.5, 1.5), rnd(1.5, 4.5), rnd(-1.5, 1.5)), rnd(3.5, 5.5), 1.0, rnd(4.5, 8), 0.75, i < 4 ? 0x2a2622 : 0x6e6358);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 48), ringMat.clone()); ring.position.copy(P); scene.add(ring);
+  rings.push({ m: ring, t: 0 });
+  for (const bb of bears) {
+    const d = bb.g.position.distanceTo(hit.point);
+    if (d < 6) bearHit(bb, 'head'); else if (d < 150) startle(bb, 0);
+  }
+  for (const pv of plates) { const d = pv.getWorldPosition(tmpV).distanceTo(hit.point); if (d < 5) pv.userData.v += 3.5 * (1 - d / 5) + 1; }
+  sfx.explode?.(range / BALL.sound, range);
+}
+function updateRings(dt) {
+  for (let i = rings.length - 1; i >= 0; i--) {
+    const r = rings[i]; r.t += dt; const k = r.t / 0.4;
+    if (k >= 1) { scene.remove(r.m); r.m.geometry.dispose(); r.m.material.dispose(); rings.splice(i, 1); continue; }
+    r.m.scale.setScalar(0.5 + k * 16); r.m.lookAt(camera.position); r.m.material.opacity = 0.55 * (1 - k);
+  }
+}
 function reportImpact(b, hit) {
   const d = tmpV.subVectors(hit.point, b.eye);
   const fwd = d.dot(b.f), up = d.dot(b.u), rt = d.dot(b.r);
@@ -1404,12 +1547,14 @@ function reportImpact(b, hit) {
   const milV = Math.atan2(up, fwd) * 1000, milH = Math.atan2(rt, fwd) * 1000;
   const v = Math.hypot(b.v[0], b.v[1], b.v[2]), J = 0.5 * b.mass * v * v;
   let mat = hit.obj.userData.mat || 'dirt', what = hit.obj.userData.kind || '標的';
+  if (hit.bear && b.ex) hit.zone = 'head';      // 炸裂弾はどこに当たっても致命傷
   if (hit.bear) {
     mat = 'bear';
     what = hit.zone === 'vital' ? '<b>ヒグマ・急所（心臓・肺）</b>' : hit.zone === 'head' ? '<b>ヒグマ・頭</b>' : 'ヒグマ・胴（手負い）';
     bearHit(hit.bear, hit.zone);
   }
   impactFx(hit, mat, J / 1000, range);
+  if (b.ex) { explode(hit, range); what = hit.bear ? '<b>ヒグマ・炸裂弾で即倒</b>' : what + '・炸裂'; }
   for (const bb of bears) if (bb !== hit.bear && bb.g.position.distanceTo(hit.point) < 25) startle(bb, 0);   // 近くに着弾すると驚いて逃げる
   const sg = x => (x >= 0 ? '+' : '−') + Math.abs(x);
   shotEl.hidden = false;
@@ -1454,7 +1599,7 @@ function fire() {
   const sc = S.aimT > 0.5;
   S.rpv += (sc ? 0.22 : 0.62) * ammo.recoil;
   S.ryv += (Math.random() - 0.35) * (sc ? 0.06 : 0.15) * ammo.recoil;
-  S.kickV += 2.6 * ammo.recoil; S.shake = 1; S.scopeKickV += 900; S.flashT = 1;
+  S.kickV += 2.6 * ammo.recoil; S.shake = ammo.boom; S.scopeKickV += 900 * Math.min(2, ammo.recoil); S.flashT = 1;
 
   // 発射炎の形を毎回変える
   const u = gun.userData;
@@ -1465,7 +1610,7 @@ function fire() {
 
   // 硝煙（銃口から前へ吹き出し、風に流れる）
   gun.updateMatrix();
-  gunPointToWorld(muzzleLocal.set(0, BORE_Y, MUZZLE_Z), muzzleWorld);
+  gunPointToWorld(muzzleLocal.copy(u.muzzle), muzzleWorld);
   const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
   const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
@@ -1474,19 +1619,21 @@ function fire() {
     const v = fwd.clone().multiplyScalar(sp).addScaledVector(right, (Math.random() - 0.5) * 2.4).addScaledVector(up, (Math.random() - 0.3) * 1.6);
     emitSmoke(muzzleWorld.clone().addScaledVector(fwd, 0.05 + Math.random() * 0.15), v, 2.2 + Math.random() * 1.6, 0.06, 0.9 + Math.random() * 0.9, 0.42);
   }
-  // 側面に吹く消炎器の4方向ガス
-  for (let i = 0; i < 4; i++) {
-    const a = i * Math.PI / 2 + Math.PI / 4;
-    const v = right.clone().multiplyScalar(Math.cos(a) * 3.5).addScaledVector(up, Math.sin(a) * 3.5).addScaledVector(fwd, 1.5);
-    emitSmoke(muzzleWorld.clone(), v, 1.4, 0.04, 0.5, 0.35);
+  // 側面に吹くガス（PX-20は制退器から真横へ大量に噴く）
+  const jets = ammo.boom > 2 ? 14 : 4;
+  for (let i = 0; i < jets; i++) {
+    const a = ammo.boom > 2 ? (i % 2 ? 0 : Math.PI) + rnd(-0.25, 0.25) : i * Math.PI / 2 + Math.PI / 4;
+    const sp = ammo.boom > 2 ? rnd(5, 11) : 3.5;
+    const v = right.clone().multiplyScalar(Math.cos(a) * sp).addScaledVector(up, Math.sin(a) * sp + (ammo.boom > 2 ? rnd(0, 1.5) : 0)).addScaledVector(fwd, 1.5);
+    emitSmoke(muzzleWorld.clone(), v, ammo.boom > 2 ? 2.2 : 1.4, 0.06, ammo.boom > 2 ? rnd(1.2, 2.2) : 0.5, ammo.boom > 2 ? 0.5 : 0.35);
   }
   // 排莢口から出る薄い煙
-  gunPointToWorld(muzzleLocal.set(0.03, 0.055, 0.0), portWorld);
+  gunPointToWorld(muzzleLocal.copy(u.port), portWorld);
   for (let i = 0; i < 3; i++) emitSmoke(portWorld.clone(), right.clone().multiplyScalar(0.6 + Math.random() * 0.6).addScaledVector(up, 0.3), 1.6, 0.02, 0.25, 0.28);
 
   // 空薬莢
   const sh = shells[shellIdx]; shellIdx = (shellIdx + 1) % shells.length;
-  sh.m.position.set(0.03, 0.055, 0.0).applyMatrix4(gun.matrix);
+  sh.m.position.copy(u.port).applyMatrix4(gun.matrix); sh.m.scale.setScalar(u.shellScale);
   sh.m.quaternion.copy(gun.quaternion); sh.m.rotateX(Math.PI / 2);
   sh.v.set(2.2 + Math.random() * 0.8, 1.3 + Math.random() * 0.5, 0.5 + Math.random() * 0.4);
   sh.w.set((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 6, 25 + Math.random() * 10);
@@ -1540,7 +1687,7 @@ function tick() {
     rl = Math.sin(Math.min(1, p) * Math.PI);
     magDrop = p < 0.2 ? p / 0.2 : p < 0.55 ? 1 : p < 0.7 ? 1 - (p - 0.55) / 0.15 : 0;   // 抜く→空→差す
     if (S.reloading <= 0) {
-      const need = M110.magSize - S.mag, take = Math.min(need, S.reserve);
+      const need = weapon.mag - S.mag, take = Math.min(need, S.reserve);
       S.mag += take; S.reserve -= take; S.reloading = 0; S.boltLocked = false; updateAmmo();
     }
   }
@@ -1588,10 +1735,10 @@ function tick() {
   const fv = S.flashT;
   const flick = fv > 0 ? 0.7 + Math.random() * 0.3 : 0;
   u.flashMat.opacity = fv * flick; u.starMat.opacity = fv * flick; u.glow.material.opacity = fv;
-  u.glow.scale.setScalar(0.18 + fv * 0.18);
+  u.glow.scale.setScalar(u.glowBase * (1 + fv));
   u.gunLight.intensity = fv * 4;
-  muzzleLightW.intensity = fv * 60;
-  if (fv > 0) { gun.updateMatrix(); gunPointToWorld(muzzleLocal.set(0, BORE_Y, MUZZLE_Z - 0.1), muzzleLightW.position); }
+  muzzleLightW.intensity = fv * 60 * Math.min(ammo.boom, 1.4);
+  if (fv > 0) { gun.updateMatrix(); gunPointToWorld(muzzleLocal.copy(u.muzzle).add(tmpV.set(0, 0, -0.1)), muzzleLightW.position); }
 
   // 空薬莢
   for (const sh of shells) {
@@ -1646,7 +1793,7 @@ function tick() {
     if (k >= 1) { scene.remove(p.sp); p.sp.material.dispose(); puffs.splice(i, 1); }
   }
 
-  if (!frozen) updateBears(dt);
+  if (!frozen) { updateBears(dt); updateRings(dt); }
   if (huntMode) {
     // 観測手：一番近い生きているヒグマの方向と距離
     let best = null, bd = 1e9;
@@ -1685,5 +1832,5 @@ addEventListener('resize', () => {
 });
 
 // テスト用の入口
-window.__game = { bears, setHunt, HUNT, fire, toggleAim, setZoom, reload, S, gun, HIP, camera, puffs, dial, setAmmo, rangefind, plates, decals, get ammo() { return ammo; }, bullets, trails, smoke, wind, ZERO_ANGLE, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, get pitch() { return pitch; }, set pitch(v) { pitch = v; } };
+window.__game = { setWeapon, get gunObj() { return gun; }, bears, setHunt, HUNT, fire, toggleAim, setZoom, reload, S, gun, HIP, camera, puffs, dial, setAmmo, rangefind, plates, decals, get ammo() { return ammo; }, bullets, trails, smoke, wind, ZERO_ANGLE, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, get pitch() { return pitch; }, set pitch(v) { pitch = v; } };
 </script>
