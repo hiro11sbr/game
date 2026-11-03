@@ -7,6 +7,9 @@
     --hud-bg: rgba(20, 22, 18, 0.55);
     --hud-line: rgba(244, 241, 234, 0.35);
     --accent: #e8b04a;
+    --btn-bg: rgba(20, 22, 18, 0.5);
+    --btn-on: rgba(232, 176, 74, 0.85);
+    --num: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
   html, body {
     margin: 0; height: 100%; overflow: hidden; background: #8fa9bf;
@@ -15,6 +18,8 @@
     -webkit-touch-callout: none; color: var(--hud-fg);
   }
   canvas { display: block; }
+  #scope { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #scope[hidden] { display: none; }
   #hud { position: fixed; inset: 0; pointer-events: none; }
   .panel {
     position: absolute; background: var(--hud-bg); border: 1px solid var(--hud-line);
@@ -23,6 +28,17 @@
   }
   #info { top: max(10px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); }
   #info b { color: var(--accent); font-weight: 600; }
+  #status {
+    top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right));
+    text-align: right; font-variant-numeric: tabular-nums;
+  }
+  #ammo { font-family: var(--num); font-size: 20px; font-weight: 600; letter-spacing: 0.02em; }
+  #ammo small { font-size: 12px; opacity: 0.7; }
+  #mag { font-family: var(--num); }
+  #shot {
+    top: calc(max(10px, env(safe-area-inset-top)) + 64px); left: max(10px, env(safe-area-inset-left));
+    font-variant-numeric: tabular-nums;
+  }
   #cross {
     position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px;
     border-radius: 50%; background: var(--hud-fg); box-shadow: 0 0 2px #000;
@@ -39,6 +55,27 @@
     bottom: max(10px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
     white-space: nowrap; opacity: 0.85;
   }
+  .btn {
+    position: absolute; pointer-events: auto; border-radius: 50%;
+    background: var(--btn-bg); border: 2px solid var(--hud-line); color: var(--hud-fg);
+    display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; line-height: 1.1;
+    font-family: inherit; text-align: center; padding: 0; -webkit-tap-highlight-color: transparent;
+  }
+  .btn:active, .btn.on { background: var(--btn-on); color: #1d1f1b; }
+  #fire {
+    width: 84px; height: 84px; font-size: 15px;
+    right: calc(max(16px, env(safe-area-inset-right)) + 8px); bottom: calc(max(16px, env(safe-area-inset-bottom)) + 8px);
+    border-color: rgba(232, 176, 74, 0.8);
+  }
+  #ads { width: 60px; height: 60px; right: calc(max(16px, env(safe-area-inset-right)) + 104px); bottom: calc(max(16px, env(safe-area-inset-bottom)) + 18px); }
+  #reload { width: 52px; height: 52px; font-size: 11px; right: calc(max(16px, env(safe-area-inset-right)) + 176px); bottom: calc(max(16px, env(safe-area-inset-bottom)) + 22px); }
+  #zoom {
+    position: absolute; pointer-events: auto; right: max(12px, env(safe-area-inset-right));
+    top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px;
+  }
+  #zoom[hidden] { display: none; }
+  #zoom .btn { position: static; width: 46px; height: 46px; font-size: 22px; }
+  #zoomv { font-family: var(--num); font-size: 13px; background: var(--hud-bg); padding: 2px 6px; border-radius: 6px; }
   #rotate {
     position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
     flex-direction: column; gap: 12px; background: rgba(20,22,18,0.82); font-size: 16px; z-index: 5;
@@ -47,15 +84,29 @@
   #rotate small { opacity: 0.7; }
   @media (orientation: portrait) and (max-width: 820px) { #rotate.show { display: flex; } }
 </style>
+<canvas id="scope" hidden></canvas>
 <div id="hud">
   <div id="info" class="panel">
-    <div><b>射撃場</b>　段階① 土台</div>
-    <div id="pos">射撃位置から 0 m</div>
+    <div><b>M110</b>　段階② 銃とスコープ</div>
+    <div id="pos">横 0.0 m</div>
+  </div>
+  <div id="shot" class="panel" hidden>—</div>
+  <div id="status" class="panel">
+    <div id="ammo">20<small> / 80</small></div>
+    <div id="mag">7.62×51 M118LR</div>
   </div>
   <div id="cross"></div>
   <div id="stick-base"></div>
   <div id="stick-knob"></div>
-  <div id="help" class="panel">左側ドラッグ：移動　／　右側ドラッグ：視点</div>
+  <div id="help" class="panel">左側：移動　右側：視点　スコープ → 発射</div>
+  <button id="fire" class="btn" type="button">発射</button>
+  <button id="ads" class="btn" type="button">スコープ</button>
+  <button id="reload" class="btn" type="button">リロード</button>
+  <div id="zoom" hidden>
+    <button id="zin" class="btn" type="button" aria-label="倍率を上げる">＋</button>
+    <div id="zoomv">10.0x</div>
+    <button id="zout" class="btn" type="button" aria-label="倍率を下げる">－</button>
+  </div>
 </div>
 <div id="rotate" class="show">
   <div>📱 横向きにしてください</div>
@@ -72,6 +123,16 @@ import * as THREE from 'three';
 const RANGE_LEN = 1000;          // 標的までの最大距離
 const LANE_HALF = 30;            // 射撃レーンの半幅
 const EYE_H = 1.65;              // 目の高さ（立ち）
+const BASE_FOV = 70;
+
+// M110 の公表値（段階③の弾道計算で使う）
+const M110 = {
+  muzzleVelocity: 783,   // m/s（M118LR 175gr）
+  barrel: 0.508,         // m
+  magSize: 20,
+  reserve: 80,
+  zoomMin: 3.5, zoomMax: 10,
+};
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
@@ -79,13 +140,14 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
-document.body.appendChild(renderer.domElement);
+renderer.autoClear = false;
+document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
 const FOG_COLOR = new THREE.Color(0xb9c8d4);
 scene.fog = new THREE.Fog(FOG_COLOR, 400, 2600);
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 6000);
+const camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.05, 6000);
 camera.rotation.order = 'YXZ';
 camera.position.set(0, EYE_H, 2);
 
@@ -128,6 +190,7 @@ function heightAt(x, z) {
   if (z < -1800) h += (-1800 - z) * 0.35 * fbm(x / 300, z / 300);             // 遠景の山
   return h;
 }
+const hitables = [];   // 弾が当たる物
 {
   const size = 5000, seg = 220;
   const geo = new THREE.PlaneGeometry(size, size, seg, seg);
@@ -147,6 +210,7 @@ function heightAt(x, z) {
   geo.computeVertexNormals();
   const ground = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
   scene.add(ground);
+  hitables.push(ground);
 }
 
 // ---------- 木（まとめて描画して軽くする） ----------
@@ -184,7 +248,6 @@ function heightAt(x, z) {
     const top = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.08, 1.0), wood); top.position.set(x, 0.9, 0.4); scene.add(top);
     const leg = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 0.12), wood); leg.position.set(x, 0.5, 0.4); scene.add(leg);
   }
-  // 射撃線（白線）
   const line = new THREE.Mesh(new THREE.PlaneGeometry(24, 0.12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
   line.rotation.x = -Math.PI / 2; line.position.set(0, 0.21, -0.95); scene.add(line);
 }
@@ -209,26 +272,184 @@ function makeLabel(text) {
       const board = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: makeLabel(d + 'm'), fog: true }));
       board.position.set(x, y + 1.2 + h / 2, -d);
       board.lookAt(0, y + 1.2 + h / 2, 0);
-      scene.add(board);
+      scene.add(board); hitables.push(board);
       const p = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.2 + h / 2, 0.15), post);
       p.position.set(x, y + (1.2 + h / 2) / 2, -d + 0.1); scene.add(p);
     }
-    // レーン中央の小さな距離杭
     const stake = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.4), new THREE.MeshLambertMaterial({ color: 0xd9d4c4 }));
-    stake.position.set(0, heightAt(0, -d) + 0.3, -d); scene.add(stake);
+    stake.position.set(0, heightAt(0, -d) + 0.3, -d); scene.add(stake); hitables.push(stake);
   }
 }
 
-// ---------- 操作（スマホ：左で移動・右で視点／PC：WASD＋ドラッグ） ----------
+// =====================================================================
+//  M110 の3Dモデル（基本図形の組み合わせ。単位m、銃口は -z 方向）
+// =====================================================================
+function buildM110() {
+  const g = new THREE.Group();
+  const black = new THREE.MeshStandardMaterial({ color: 0x5a5f63, roughness: 0.55, metalness: 0.1 });
+  const poly = new THREE.MeshStandardMaterial({ color: 0x4c5053, roughness: 0.9, metalness: 0.0 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x6a6f73, roughness: 0.4, metalness: 0.25 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x24384a, roughness: 0.05, metalness: 0.9, emissive: 0x0a1420 });
+  const box = (w, h, d, mat, x, y, z, rx = 0) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m;
+  };
+  const cyl = (r1, r2, len, mat, x, y, z, seg = 16) => {     // z軸方向の円柱
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, len, seg), mat);
+    m.rotation.x = Math.PI / 2; m.position.set(x, y, z); g.add(m); return m;
+  };
+
+  // 銃床（伸縮式・頬当て付き）と緩衝筒
+  cyl(0.016, 0.016, 0.22, black, 0, 0.012, 0.21);
+  box(0.044, 0.07, 0.17, poly, 0, 0.012, 0.31);            // 銃床の上部
+  box(0.040, 0.03, 0.13, poly, 0, 0.06, 0.32);             // 頬当て
+  box(0.038, 0.09, 0.12, poly, 0, -0.045, 0.335, -0.42);   // 銃床の下部（斜め）
+  box(0.046, 0.15, 0.02, new THREE.MeshStandardMaterial({ color: 0x1c1d1e, roughness: 0.95 }), 0, -0.02, 0.40); // 床尾パッド
+
+  // 機関部（下部・上部）
+  box(0.058, 0.065, 0.22, black, 0, -0.012, -0.01);
+  box(0.054, 0.058, 0.25, black, 0, 0.049, -0.015);
+  box(0.004, 0.026, 0.08, steel, 0.029, 0.045, 0.0);      // 排莢口カバー（右側）
+  cyl(0.008, 0.008, 0.03, steel, 0.031, 0.06, 0.07, 10);   // ボルト前進補助（右後ろ）
+  box(0.05, 0.012, 0.02, black, 0, 0.083, 0.11);           // 槓桿（チャージングハンドル）
+  box(0.066, 0.03, 0.10, black, 0, -0.058, -0.075);        // 弾倉の差込口
+
+  // 弾倉（20発）
+  box(0.03, 0.165, 0.078, poly, 0, -0.145, -0.07, 0.07);
+  box(0.034, 0.012, 0.084, poly, 0, -0.226, -0.064, 0.07);
+
+  // 握り（グリップ）と用心金・引き金
+  box(0.032, 0.115, 0.045, poly, 0, -0.085, 0.07, -0.33);
+  box(0.012, 0.006, 0.075, black, 0, -0.062, 0.018);
+  box(0.004, 0.022, 0.006, steel, 0, -0.05, 0.02, 0.2);
+
+  // ハンドガード（八角形・フリーフロート）と側面のレール
+  const hg = cyl(0.046, 0.046, 0.42, black, 0, 0.03, -0.35, 8); hg.rotation.y = Math.PI / 8;
+  for (const sx of [-1, 1]) box(0.008, 0.018, 0.40, black, sx * 0.047, 0.03, -0.35);
+  box(0.018, 0.008, 0.40, black, 0, -0.019, -0.35);
+
+  // 上面のピカティニーレール（溝付き）
+  box(0.022, 0.008, 0.66, black, 0, 0.082, -0.23);
+  const notch = new THREE.InstancedMesh(new THREE.BoxGeometry(0.023, 0.005, 0.0053), black, 66);
+  const mm = new THREE.Matrix4();
+  for (let i = 0; i < 66; i++) { mm.makeTranslation(0, 0.088, 0.095 - i * 0.01); notch.setMatrixAt(i, mm); }
+  g.add(notch);
+
+  // 銃身・消炎器・消音器
+  cyl(0.0115, 0.0115, 0.16, steel, 0, 0.03, -0.64);
+  cyl(0.014, 0.014, 0.04, steel, 0, 0.03, -0.735);
+  cyl(0.021, 0.021, 0.20, black, 0, 0.03, -0.85, 20);
+  cyl(0.019, 0.021, 0.012, steel, 0, 0.03, -0.954, 20);
+
+  // 二脚（折りたたみ）
+  for (const sx of [-1, 1]) cyl(0.005, 0.005, 0.22, steel, sx * 0.012, -0.03, -0.44, 8);
+  box(0.035, 0.02, 0.03, black, 0, -0.03, -0.55);
+
+  // スコープ（3.5-10倍・40mm）
+  const sy = 0.132;
+  for (const rz of [-0.04, -0.19]) { box(0.03, 0.04, 0.022, black, 0, 0.108, rz); }
+  cyl(0.0152, 0.0152, 0.30, black, 0, sy, -0.12, 20);                 // 本体の筒
+  cyl(0.0152, 0.026, 0.05, black, 0, sy, -0.295, 20);                // 対物側の広がり
+  cyl(0.026, 0.026, 0.07, black, 0, sy, -0.355, 20);                 // 対物レンズ部
+  cyl(0.024, 0.024, 0.002, glass, 0, sy, -0.391, 20);
+  cyl(0.0152, 0.021, 0.04, black, 0, sy, 0.05, 20);                  // 接眼側
+  cyl(0.021, 0.021, 0.06, black, 0, sy, 0.10, 20);
+  cyl(0.019, 0.019, 0.002, glass, 0, sy, 0.131, 20);
+  const tE = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.03, 18), black); tE.position.set(0, sy + 0.028, -0.11); g.add(tE); // 上下調整ダイヤル
+  const tW = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.026, 18), black); tW.rotation.z = Math.PI / 2; tW.position.set(0.027, sy, -0.11); g.add(tW); // 左右調整ダイヤル
+  box(0.024, 0.024, 0.04, black, 0, sy, -0.11);                       // ダイヤルの台座
+  const zr = cyl(0.022, 0.022, 0.02, poly, 0, sy, 0.065, 20);         // 倍率リング
+
+  // 銃口の発射炎（消音器付きなので小さめ）
+  const flash = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffc56a, transparent: true, opacity: 0, depthWrite: false }));
+  flash.position.set(0, 0.03, -0.98); flash.scale.set(1, 1, 2.2); g.add(flash);
+  g.userData.flash = flash;
+  return g;
+}
+
+// 銃は手前に別で描く（地形にめり込まないように）
+const gunScene = new THREE.Scene();
+const gunCam = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.01, 10);
+gunScene.add(new THREE.HemisphereLight(0xdfeaf5, 0x4a5530, 1.6));
+const gunSun = new THREE.DirectionalLight(0xfff1d6, 3.2); gunSun.position.set(-1, 2, 1.5); gunScene.add(gunSun);
+const gunFill = new THREE.DirectionalLight(0xbfd2e6, 0.8); gunFill.position.set(1.5, 0.3, -1); gunScene.add(gunFill);
+const gun = buildM110();
+gunScene.add(gun);
+const HIP = { pos: new THREE.Vector3(0.2, -0.19, -0.6), rot: new THREE.Euler(0.02, 0.05, 0.0) };
+const AIM = { pos: new THREE.Vector3(0.0, -0.132, -0.22), rot: new THREE.Euler(0, 0, 0) };
+
+// =====================================================================
+//  スコープ表示（ミルドット照準。目盛り＝1ミル間隔、倍率に合わせて拡大縮小）
+// =====================================================================
+const scopeCv = document.getElementById('scope');
+const sctx = scopeCv.getContext('2d');
+const zoomEl = document.getElementById('zoomv');
+let zoom = 10;
+// 視野の広さ：3.5倍で約5.7°、10倍で約2.0°（同クラスのスコープの公表値に近い値）
+const scopeFovDeg = () => 20 / zoom;
+function scopeRadiusPx() { return Math.min(innerWidth, innerHeight) * 0.47; }
+function drawScope() {
+  const dpr = Math.min(devicePixelRatio, 2);
+  const W = innerWidth, H = innerHeight;
+  if (scopeCv.width !== W * dpr) { scopeCv.width = W * dpr; scopeCv.height = H * dpr; }
+  const c = sctx; c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+  const cx = W / 2, cy = H / 2, r = scopeRadiusPx();
+  // 外側を黒く塗る
+  c.fillStyle = '#050505'; c.beginPath(); c.rect(0, 0, W, H); c.arc(cx, cy, r, 0, Math.PI * 2, true); c.fill();
+  // レンズのふち（暗い輪）
+  const vg = c.createRadialGradient(cx, cy, r * 0.82, cx, cy, r);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.75)');
+  c.fillStyle = vg; c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
+  // 照準線
+  const pxPerMil = (2 * r) / (scopeFovDeg() * Math.PI / 180 * 1000);
+  c.save(); c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.clip();
+  c.strokeStyle = '#0b0b0b'; c.fillStyle = '#0b0b0b';
+  c.lineWidth = 1.2;
+  c.beginPath(); c.moveTo(cx - r, cy); c.lineTo(cx + r, cy); c.moveTo(cx, cy - r); c.lineTo(cx, cy + r); c.stroke();
+  const post = 5 * pxPerMil, thick = Math.max(4, pxPerMil * 0.22);
+  c.fillRect(cx - r, cy - thick / 2, r - post, thick); c.fillRect(cx + post, cy - thick / 2, r - post, thick);
+  c.fillRect(cx - thick / 2, cy + post, thick, r - post); c.fillRect(cx - thick / 2, cy - r, thick, r - post);
+  const dotR = Math.max(1.6, pxPerMil * 0.11);
+  for (let i = -4; i <= 4; i++) {
+    if (i === 0) continue;
+    c.beginPath(); c.arc(cx + i * pxPerMil, cy, dotR, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.arc(cx, cy + i * pxPerMil, dotR, 0, Math.PI * 2); c.fill();
+  }
+  c.restore();
+  // 目盛りの説明
+  c.fillStyle = 'rgba(238,240,232,0.75)'; c.font = '11px ui-monospace, Menlo, monospace'; c.textAlign = 'center';
+  c.fillText('点の間隔 = 1ミル（100mで10cm）', cx, cy + r + 14 > H - 4 ? H - 6 : cy + r + 14);
+  zoomEl.textContent = zoom.toFixed(1) + 'x';
+}
+
+// =====================================================================
+//  状態・操作
+// =====================================================================
+const S = {
+  aiming: false, aimT: 0,          // 0=腰だめ 1=スコープ
+  mag: M110.magSize, reserve: M110.reserve,
+  reloading: 0, lastShot: -1,
+  recoil: 0, recoilV: 0,           // 視点の跳ね上がり（ラジアン）
+  kick: 0,                          // 銃の後退（表示用）
+};
 const move = { x: 0, y: 0 };
 let yaw = 0, pitch = 0;
 const stickBase = document.getElementById('stick-base'), stickKnob = document.getElementById('stick-knob');
 const touches = new Map();  // id -> {type, sx, sy, lx, ly}
 const LOOK_SENS = 0.0042;
+const ammoEl = document.getElementById('ammo'), shotEl = document.getElementById('shot');
+const adsBtn = document.getElementById('ads'), zoomBox = document.getElementById('zoom');
+const crossEl = document.getElementById('cross'), helpEl = document.getElementById('help');
 
-function onDown(id, x, y) {
-  const type = x < innerWidth * 0.45 ? 'move' : 'look';
-  for (const t of touches.values()) if (t.type === type) return; // 同じ役割は1本の指だけ
+function updateAmmo() {
+  ammoEl.innerHTML = `${S.mag}<small> / ${S.reserve}</small>`;
+  ammoEl.style.color = S.mag === 0 ? 'var(--accent)' : '';
+}
+
+function onDown(id, x, y, force) {
+  const type = force || (x < innerWidth * 0.45 ? 'move' : 'look');
+  for (const t of touches.values()) if (t.type === type) return;
+  if (type === 'move' && S.aiming) return;   // スコープ中は動かない
   touches.set(id, { type, sx: x, sy: y, lx: x, ly: y });
   if (type === 'move') {
     stickBase.style.display = stickKnob.style.display = 'block';
@@ -244,7 +465,8 @@ function onMoveP(id, x, y) {
     move.x = dx / max; move.y = dy / max;
     stickKnob.style.left = (t.sx + dx) + 'px'; stickKnob.style.top = (t.sy + dy) + 'px';
   } else {
-    yaw -= (x - t.lx) * LOOK_SENS; pitch -= (y - t.ly) * LOOK_SENS;
+    const k = LOOK_SENS * (camera.fov / BASE_FOV) * (S.aiming ? 1.25 : 1);   // 倍率が高いほどゆっくり
+    yaw -= (x - t.lx) * k; pitch -= (y - t.ly) * k;
     pitch = Math.max(-1.3, Math.min(1.3, pitch));
   }
   t.lx = x; t.ly = y;
@@ -255,44 +477,226 @@ function onUp(id) {
   touches.delete(id);
 }
 const cv = renderer.domElement;
-cv.addEventListener('touchstart', e => { e.preventDefault(); for (const t of e.changedTouches) onDown(t.identifier, t.clientX, t.clientY); }, { passive: false });
-cv.addEventListener('touchmove', e => { e.preventDefault(); for (const t of e.changedTouches) onMoveP(t.identifier, t.clientX, t.clientY); }, { passive: false });
-cv.addEventListener('touchend', e => { for (const t of e.changedTouches) onUp(t.identifier); });
-cv.addEventListener('touchcancel', e => { for (const t of e.changedTouches) onUp(t.identifier); });
-cv.addEventListener('mousedown', e => onDown('m', e.clientX, e.clientY));
+cv.addEventListener('touchstart', e => { e.preventDefault(); ensureAudio(); for (const t of e.changedTouches) onDown(t.identifier, t.clientX, t.clientY); }, { passive: false });
+addEventListener('touchmove', e => { e.preventDefault(); for (const t of e.changedTouches) onMoveP(t.identifier, t.clientX, t.clientY); }, { passive: false });
+addEventListener('touchend', e => { for (const t of e.changedTouches) onUp(t.identifier); });
+addEventListener('touchcancel', e => { for (const t of e.changedTouches) onUp(t.identifier); });
+cv.addEventListener('mousedown', e => { ensureAudio(); onDown('m', e.clientX, e.clientY); });
 addEventListener('mousemove', e => onMoveP('m', e.clientX, e.clientY));
 addEventListener('mouseup', () => onUp('m'));
+cv.addEventListener('contextmenu', e => { e.preventDefault(); toggleAim(); });
+cv.addEventListener('wheel', e => { if (S.aiming) setZoom(zoom - Math.sign(e.deltaY) * 0.5); }, { passive: true });
 const keys = {};
-addEventListener('keydown', e => keys[e.code] = true);
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space' || e.code === 'KeyF') { ensureAudio(); fire(); }
+  if (e.code === 'KeyQ') toggleAim();
+  if (e.code === 'KeyR') reload();
+});
 addEventListener('keyup', e => keys[e.code] = false);
 
+// ボタン：押した指はそのまま視点ドラッグにも使える
+function bindBtn(el, fn, dragLook) {
+  el.addEventListener('touchstart', e => {
+    e.preventDefault(); e.stopPropagation(); ensureAudio(); fn();
+    if (dragLook) for (const t of e.changedTouches) onDown(t.identifier, t.clientX, t.clientY, 'look');
+  }, { passive: false });
+  el.addEventListener('mousedown', e => { e.stopPropagation(); ensureAudio(); fn(); });
+}
+bindBtn(document.getElementById('fire'), () => fire(), true);
+bindBtn(adsBtn, () => toggleAim(), false);
+bindBtn(document.getElementById('reload'), () => reload(), false);
+bindBtn(document.getElementById('zin'), () => setZoom(zoom + 0.5), false);
+bindBtn(document.getElementById('zout'), () => setZoom(zoom - 0.5), false);
 document.getElementById('rotate').addEventListener('click', e => e.currentTarget.classList.remove('show'));
+
+function setZoom(z) { zoom = Math.max(M110.zoomMin, Math.min(M110.zoomMax, Math.round(z * 2) / 2)); drawScope(); }
+function toggleAim() {
+  if (S.reloading > 0) return;
+  S.aiming = !S.aiming;
+  adsBtn.classList.toggle('on', S.aiming);
+  if (S.aiming) { for (const [id, t] of touches) if (t.type === 'move') onUp(id); }
+}
+function reload() {
+  if (S.reloading > 0 || S.mag === M110.magSize || S.reserve === 0) return;
+  if (S.aiming) toggleAim();
+  S.reloading = 2.6;
+  playClick(0.0); playClick(1.1); playClick(2.2);
+}
+
+// ---------- 音（その場で合成。最初のタップ後に鳴る） ----------
+let actx = null;
+function ensureAudio() {
+  if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
+  try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { actx = null; }
+}
+function noiseBuf(sec) {
+  const b = actx.createBuffer(1, actx.sampleRate * sec, actx.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return b;
+}
+function playShot() {
+  if (!actx) return;
+  const t = actx.currentTime;
+  const src = actx.createBufferSource(); src.buffer = noiseBuf(0.5);
+  const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(2400, t); lp.frequency.exponentialRampToValueAtTime(180, t + 0.35);
+  const gn = actx.createGain(); gn.gain.setValueAtTime(0.9, t); gn.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+  src.connect(lp).connect(gn).connect(actx.destination); src.start(t);
+  const o = actx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.15);
+  const og = actx.createGain(); og.gain.setValueAtTime(0.6, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+  o.connect(og).connect(actx.destination); o.start(t); o.stop(t + 0.2);
+}
+function playClick(delay) {
+  if (!actx) return;
+  const t = actx.currentTime + delay;
+  const src = actx.createBufferSource(); src.buffer = noiseBuf(0.05);
+  const hp = actx.createBiquadFilter(); hp.type = 'bandpass'; hp.frequency.value = 2800; hp.Q.value = 3;
+  const gn = actx.createGain(); gn.gain.setValueAtTime(0.5, t); gn.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+  src.connect(hp).connect(gn).connect(actx.destination); src.start(t);
+}
+function playImpact(delay) {
+  if (!actx) return;
+  const t = actx.currentTime + delay;
+  const src = actx.createBufferSource(); src.buffer = noiseBuf(0.15);
+  const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700;
+  const gn = actx.createGain(); gn.gain.setValueAtTime(0.25, t); gn.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+  src.connect(lp).connect(gn).connect(actx.destination); src.start(t);
+}
+
+// ---------- 着弾の土煙 ----------
+const dustTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+  const gr = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(196,170,120,1)'); gr.addColorStop(0.5, 'rgba(176,150,105,0.6)'); gr.addColorStop(1, 'rgba(160,135,95,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+const puffs = [];
+function spawnPuff(p, delay) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dustTex, transparent: true, depthWrite: false, opacity: 0 }));
+  sp.position.copy(p); sp.scale.setScalar(0.01); scene.add(sp);
+  puffs.push({ sp, t: -delay, y0: p.y });
+}
+
+// ---------- 発射（段階②は仮：弾はまっすぐ飛ぶ。段階③で弾道計算に置き換える） ----------
+const ray = new THREE.Raycaster();
+const tmpV = new THREE.Vector3();
+function fire() {
+  const now = performance.now() / 1000;
+  if (S.reloading > 0) return;
+  if (now - S.lastShot < 0.18) return;          // 半自動：1回押すたびに1発
+  if (S.mag === 0) { playClick(0); return; }
+  S.lastShot = now; S.mag--; updateAmmo();
+  playShot();
+  gun.userData.flash.material.opacity = 1;
+  S.kick = 1;
+  S.recoilV += S.aiming ? 0.11 : 0.16;          // 視点の跳ね上がり
+
+  // 視線の中心から（揺れを含めて）まっすぐ
+  ray.setFromCamera({ x: 0, y: 0 }, camera);
+  ray.far = 3000;
+  const hit = ray.intersectObjects(hitables, false)[0];
+  shotEl.hidden = false;
+  if (hit) {
+    const tof = hit.distance / M110.muzzleVelocity;
+    spawnPuff(hit.point.clone(), tof);
+    playImpact(tof + hit.distance / 343);
+    shotEl.innerHTML = `着弾 <b>${hit.distance.toFixed(0)} m</b>　飛行 ${tof.toFixed(2)} 秒<br><small>仮表示：弾はまっすぐ飛ぶ（段階③で弾道計算）</small>`;
+  } else {
+    shotEl.innerHTML = '着弾なし（空）';
+  }
+  if (S.mag === 0 && S.reserve > 0) setTimeout(reload, 400);
+}
 
 // ---------- ループ ----------
 const posEl = document.getElementById('pos');
 const clock = new THREE.Clock();
 const WALK = 4.0; // m/s
+const lerpE = (a, b, t) => new THREE.Euler(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
+let t0 = 0;
 function tick() {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const dt = Math.min(clock.getDelta(), 0.05); t0 += dt;
+
+  // 移動
   let mx = move.x, my = move.y;
-  if (keys.KeyW) my -= 1; if (keys.KeyS) my += 1; if (keys.KeyA) mx -= 1; if (keys.KeyD) mx += 1;
-  const fwd = -my, right = mx;
+  if (!S.aiming) { if (keys.KeyW) my -= 1; if (keys.KeyS) my += 1; if (keys.KeyA) mx -= 1; if (keys.KeyD) mx += 1; }
+  const fwd = -my, right = mx, moving = Math.hypot(mx, my) > 0.05;
   const sin = Math.sin(yaw), cos = Math.cos(yaw);
   camera.position.x += (right * cos - fwd * sin) * WALK * dt;
   camera.position.z += (-right * sin - fwd * cos) * WALK * dt;
-  // 移動範囲：射撃位置の台の上だけ（標的側へは出られない）
   camera.position.x = Math.max(-11, Math.min(11, camera.position.x));
   camera.position.z = Math.max(-0.6, Math.min(6.5, camera.position.z));
   camera.position.y = EYE_H + 0.2;
-  camera.rotation.set(pitch, yaw, 0);
+
+  // リロード
+  if (S.reloading > 0) {
+    S.reloading -= dt;
+    if (S.reloading <= 0) {
+      const need = M110.magSize - S.mag, take = Math.min(need, S.reserve);
+      S.mag += take; S.reserve -= take; S.reloading = 0; updateAmmo();
+    }
+  }
+
+  // 反動（ばねで戻る）
+  S.recoilV -= S.recoil * 90 * dt; S.recoilV *= Math.exp(-14 * dt);
+  S.recoil += S.recoilV * dt * 10;
+  S.kick *= Math.exp(-12 * dt);
+  const fl = gun.userData.flash.material; fl.opacity *= Math.exp(-40 * dt);
+
+  // スコープの出し入れ
+  S.aimT += ((S.aiming ? 1 : 0) - S.aimT) * Math.min(1, dt * 12);
+  const inScope = S.aimT > 0.92;
+  scopeCv.hidden = !inScope; zoomBox.hidden = !inScope;
+  crossEl.style.display = S.aimT > 0.2 ? 'none' : ''; helpEl.style.display = S.aimT > 0.2 ? 'none' : '';
+  if (inScope) {
+    camera.fov = scopeFovDeg() * (innerHeight / (2 * scopeRadiusPx()));
+  } else {
+    camera.fov = BASE_FOV - S.aimT * 20;
+  }
+  camera.updateProjectionMatrix();
+
+  // 構えの揺れ（呼吸）。スコープ中は小さく、射撃台に依託しているので約0.15ミル
+  const swayA = inScope ? 0.00015 : 0.0008;
+  const swayX = Math.sin(t0 * 0.9) * swayA + Math.sin(t0 * 2.3) * swayA * 0.4;
+  const swayY = Math.sin(t0 * 1.3 + 1) * swayA * 0.8;
+  camera.rotation.set(pitch + S.recoil * 0.12 + swayY, yaw + swayX, 0);
+
+  // 銃の位置（腰だめ ⇄ 構え）
+  const bob = moving && !S.aiming ? Math.sin(t0 * 9) * 0.006 : 0;
+  const rl = S.reloading > 0 ? Math.sin(Math.min(1, (2.6 - S.reloading) / 2.6) * Math.PI) : 0;
+  gun.position.lerpVectors(HIP.pos, AIM.pos, S.aimT);
+  gun.position.y += bob - rl * 0.12; gun.position.z += S.kick * 0.045;
+  const r = lerpE(HIP.rot, AIM.rot, S.aimT);
+  gun.rotation.set(r.x + S.kick * 0.05 + rl * 0.5, r.y, r.z - rl * 0.35);
+  gun.visible = !inScope;
+
+  // 土煙
+  for (let i = puffs.length - 1; i >= 0; i--) {
+    const p = puffs[i]; p.t += dt;
+    if (p.t < 0) continue;
+    const k = p.t / 1.6;
+    p.sp.material.opacity = Math.max(0, 0.9 * (1 - k));
+    const sc = 1.2 + k * 3.5;
+    p.sp.scale.setScalar(sc);
+    p.sp.position.y = p.y0 + sc * 0.4 + k * 0.6;   // 地面に埋もれないよう持ち上げる
+    if (k >= 1) { scene.remove(p.sp); p.sp.material.dispose(); puffs.splice(i, 1); }
+  }
+
   posEl.textContent = `横 ${camera.position.x.toFixed(1)} m ／ 視線 ${((-yaw * 180 / Math.PI) % 360).toFixed(0)}°`;
+
+  renderer.clear();
   renderer.render(scene, camera);
+  if (gun.visible) { renderer.clearDepth(); renderer.render(gunScene, gunCam); }
   requestAnimationFrame(tick);
 }
-tick();
+updateAmmo(); drawScope(); tick();
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  gunCam.aspect = innerWidth / innerHeight; gunCam.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); drawScope();
 });
+
+// テスト用の入口
+window.__game = { fire, toggleAim, setZoom, reload, S, gun, HIP, puffs, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, get pitch() { return pitch; }, set pitch(v) { pitch = v; } };
 </script>
