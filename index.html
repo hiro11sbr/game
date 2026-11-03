@@ -81,13 +81,10 @@
   }
   #ads { width: 60px; height: 60px; right: calc(max(16px, env(safe-area-inset-right)) + 104px); bottom: calc(max(16px, env(safe-area-inset-bottom)) + 18px); }
   #reload { width: 52px; height: 52px; font-size: 11px; right: calc(max(16px, env(safe-area-inset-right)) + 176px); bottom: calc(max(16px, env(safe-area-inset-bottom)) + 22px); }
-  #zoom {
-    position: absolute; pointer-events: auto; right: max(12px, env(safe-area-inset-right));
-    top: 50%; transform: translateY(-50%); display: flex; flex-direction: row; align-items: center; gap: 6px;
-  }
+  #zoom { pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
   #zoom[hidden] { display: none; }
   #ztrack {
-    position: relative; width: 44px; height: min(36vh, 150px); border-radius: 22px; touch-action: none;
+    position: relative; width: 40px; height: 128px; border-radius: 20px; touch-action: none;
     background: var(--hud-bg); border: 1px solid var(--hud-line); overflow: hidden;
   }
   #zfill { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(232, 176, 74, 0.28); }
@@ -105,11 +102,12 @@
   #ammoBtn b { color: var(--accent); font-weight: 600; }
   #dial {
     position: absolute; pointer-events: auto; left: max(10px, env(safe-area-inset-left));
-    bottom: max(10px, env(safe-area-inset-bottom)); display: grid; gap: 4px; justify-items: center;
+    bottom: max(10px, env(safe-area-inset-bottom)); display: flex; gap: 10px; align-items: center;
     background: var(--hud-bg); border: 1px solid var(--hud-line); border-radius: 10px; padding: 8px;
     font-variant-numeric: tabular-nums; font-size: 12px;
   }
   #dial[hidden] { display: none; }
+  #dial .dcol { display: grid; gap: 4px; justify-items: center; }
   #dial .btn { position: static; width: 36px; height: 36px; font-size: 14px; border-radius: 8px; }
   #dial .pad { display: grid; grid-template-columns: repeat(3, 36px); grid-template-rows: repeat(3, 36px); gap: 3px; }
   #dial .pad .mid { display: flex; align-items: center; justify-content: center; font-size: 10px; opacity: 0.6; }
@@ -150,6 +148,7 @@
   <button id="ads" class="btn" type="button">スコープ</button>
   <button id="reload" class="btn" type="button">リロード</button>
   <div id="dial" hidden>
+    <div class="dcol">
     <div class="pad">
       <span></span><button id="eUp" class="btn" type="button" aria-label="着弾を上へ">▲</button><span></span>
       <button id="wL" class="btn" type="button" aria-label="着弾を左へ">◀</button><span class="mid">ミル</span><button id="wR" class="btn" type="button" aria-label="着弾を右へ">▶</button>
@@ -157,10 +156,12 @@
     </div>
     <div class="val">上下 <b id="eVal">+0.0</b>・左右 <b id="wVal">0.0</b></div>
     <div class="lr"><button id="lrf" class="btn" type="button">測距</button><span class="val" id="lrfVal">— m</span></div>
-  </div>
-  <div id="zoom" hidden>
-    <div id="zoomv">10.0x</div>
-    <div id="ztrack" role="slider" aria-label="スコープの倍率"><div id="zfill"></div><div id="zthumb"></div></div>
+    </div>
+    <div id="zoom" hidden>
+      <div id="zoomv">10.0x</div>
+      <div id="ztrack" role="slider" aria-label="スコープの倍率"><div id="zfill"></div><div id="zthumb"></div></div>
+      <div class="cap">倍率</div>
+    </div>
   </div>
 </div>
 <div id="rotate" class="show">
@@ -1171,21 +1172,46 @@ function drawScope() {
   vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.75)');
   c.fillStyle = vg; c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
   const pxPerMil = (2 * r) / (scopeFovDeg() * Math.PI / 180 * 1000);
+  // ツリー型の目盛り（第1焦点面：どの倍率でもミルの値は正しい）。間隔が狭いときは細かい線を省く
+  const step = pxPerMil >= 9 ? 1 : pxPerMil >= 4.5 ? 2 : 5;          // 線を引く間隔（ミル）
+  const numStep = step === 1 ? 2 : step === 2 ? 4 : 10;               // 数字を付ける間隔
   c.save(); c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.clip();
   c.strokeStyle = '#0b0b0b'; c.fillStyle = '#0b0b0b'; c.lineWidth = 1.2;
-  c.beginPath(); c.moveTo(cx - r, cy); c.lineTo(cx + r, cy); c.moveTo(cx, cy - r); c.lineTo(cx, cy + r); c.stroke();
-  const post = 5 * pxPerMil, thick = Math.max(4, pxPerMil * 0.22);
-  c.fillRect(cx - r, cy - thick / 2, r - post, thick); c.fillRect(cx + post, cy - thick / 2, r - post, thick);
-  c.fillRect(cx - thick / 2, cy + post, thick, r - post); c.fillRect(cx - thick / 2, cy - r, thick, r - post);
-  const dotR = Math.max(1.6, pxPerMil * 0.11);
-  for (let i = -4; i <= 4; i++) {
-    if (i === 0) continue;
-    c.beginPath(); c.arc(cx + i * pxPerMil, cy, dotR, 0, Math.PI * 2); c.fill();
-    c.beginPath(); c.arc(cx, cy + i * pxPerMil, dotR, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.moveTo(cx - r, cy); c.lineTo(cx + r, cy); c.moveTo(cx, cy - r); c.lineTo(cx, cy + 20.5 * pxPerMil); c.stroke();
+  const thick = 4, postH = 10 * pxPerMil, postV = 20 * pxPerMil;
+  if (postH < r) { c.fillRect(cx - r, cy - thick / 2, r - postH, thick); c.fillRect(cx + postH, cy - thick / 2, r - postH, thick); }
+  if (5 * pxPerMil < r) c.fillRect(cx - thick / 2, cy - r, thick, r - 5 * pxPerMil);
+  if (postV < r) c.fillRect(cx - thick / 2, cy + postV, thick, r - postV);
+  const label = (txt, x, y) => { c.font = '600 10px ui-monospace, Menlo, monospace'; c.lineWidth = 3; c.strokeStyle = 'rgba(235,232,220,0.75)'; c.strokeText(txt, x, y); c.fillText(txt, x, y); c.lineWidth = 1.2; c.strokeStyle = '#0b0b0b'; };
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  // 左右の目盛り（±10ミル）
+  for (let m = step; m <= 10; m += step) for (const sg of [-1, 1]) {
+    const x = cx + sg * m * pxPerMil, big = m % numStep === 0, h = big ? 7 : 4;
+    c.beginPath(); c.moveTo(x, cy - h); c.lineTo(x, cy + h); c.stroke();
+    if (big) label(String(m), x, cy - 14);
   }
+  // 上の目盛り（5ミルまで）
+  for (let m = step; m < 5; m += step) { const y = cy - m * pxPerMil; c.beginPath(); c.moveTo(cx - 4, y); c.lineTo(cx + 4, y); c.stroke(); }
+  // 下のツリー（20ミルまで）：落下を読む横線と、風を読む点
+  for (let m = step; m <= 20; m += step) {
+    const y = cy + m * pxPerMil, big = m % numStep === 0, h = big ? 8 : 5;
+    c.beginPath(); c.moveTo(cx - h, y); c.lineTo(cx + h, y); c.stroke();
+    const wMax = Math.min(10, Math.floor(m / 2));                      // 下へ行くほど横に広がる
+    if (big) { c.textAlign = 'left'; label(String(m), cx + Math.max(11, (Math.floor(wMax / step) * step + 0.6) * pxPerMil + 4), y); c.textAlign = 'center'; }
+    if (m % (step * 2) === 0 || step === 5) {
+      for (let k = step; k <= wMax; k += step) for (const sg of [-1, 1]) { c.beginPath(); c.arc(cx + sg * k * pxPerMil, y, 1.4, 0, Math.PI * 2); c.fill(); }
+    }
+  }
+  // 中心付近の0.2ミル刻み（拡大したときだけ）
+  if (pxPerMil >= 28) for (let m = 0.2; m < 1; m += 0.2) for (const sg of [-1, 1]) {
+    c.beginPath(); c.moveTo(cx + sg * m * pxPerMil, cy - 2.5); c.lineTo(cx + sg * m * pxPerMil, cy + 2.5); c.stroke();
+    c.beginPath(); c.moveTo(cx - 2.5, cy + m * pxPerMil); c.lineTo(cx + 2.5, cy + m * pxPerMil); c.stroke();
+  }
+  c.beginPath(); c.arc(cx, cy, 1.3, 0, Math.PI * 2); c.fill();
   c.restore();
+  c.textBaseline = 'alphabetic';
   c.fillStyle = 'rgba(238,240,232,0.75)'; c.font = '11px ui-monospace, Menlo, monospace'; c.textAlign = 'center';
-  c.fillText('点の間隔 = 1ミル（100mで10cm）', cx, Math.min(cy + r + 14, H - PAD - 6));
+  c.fillText(`目盛り1本 = ${step}ミル・数字はミル（1ミル＝100mで10cm）`, cx, Math.min(cy + r + 14, H - PAD - 6));
   zoomEl.textContent = zoom.toFixed(1) + 'x';
 }
 
@@ -1215,7 +1241,7 @@ function updateAmmo() {
 }
 
 function onDown(id, x, y, force) {
-  const type = force || (x < innerWidth * 0.45 ? 'move' : 'look');
+  const type = force || (S.aiming ? 'look' : x < innerWidth * 0.4 ? 'move' : 'look');   // スコープ中は画面全体で狙う
   for (const t of touches.values()) if (t.type === type) return;
   if (type === 'move' && S.aiming) return;
   touches.set(id, { type, sx: x, sy: y, lx: x, ly: y });
@@ -1530,9 +1556,9 @@ function g7cd(M) {
 const AMMO = {
   m118: { key: 'm118', short: 'M110', name: '7.62×51 M118LR', v0: 783, bcG7: 0.25, mass: 0.01134, sightH: 0.065, sg: 1.7, zoomMin: 3.5, zoomMax: 10, recoil: 1, boom: 1 },
   // TAC-50：.50 BMG Hornady 750gr A-MAX、初速823m/s。G7弾道係数0.50は推定値
-  bmg: { key: 'bmg', short: 'TAC-50', name: '.50 BMG 750gr A-MAX', v0: 823, bcG7: 0.50, mass: 0.0486, sightH: 0.07, sg: 1.6, zoomMin: 5.5, zoomMax: 22, recoil: 1.6, boom: 1.6 },
+  bmg: { key: 'bmg', short: 'TAC-50', name: '.50 BMG 750gr A-MAX', v0: 823, bcG7: 0.50, mass: 0.0486, sightH: 0.07, sg: 1.6, zoomMin: 7, zoomMax: 35, recoil: 1.6, boom: 1.6 },
   // 架空：PX-20 の20mm炸裂弾。初速1150m/s・125g（ゲーム用の設定値）
-  px: { key: 'px', short: 'PX-20', name: '20mm 炸裂弾（架空）', v0: 1150, bcG7: 0.62, mass: 0.125, sightH: 0.075, sg: 1.8, zoomMin: 5, zoomMax: 25, recoil: 2.4, boom: 2.6, explosive: true },
+  px: { key: 'px', short: 'PX-20', name: '20mm 炸裂弾（架空）', v0: 1150, bcG7: 0.62, mass: 0.125, sightH: 0.075, sg: 1.8, zoomMin: 5, zoomMax: 40, recoil: 2.4, boom: 2.6, explosive: true },
 };
 let ammo = AMMO.m118, KDRAG = 0, ZERO_ANGLE = 0;
 // 地球の自転（コリオリの力）：北緯36°で真北へ撃つ想定
