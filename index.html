@@ -18,8 +18,13 @@
     -webkit-touch-callout: none; color: var(--hud-fg);
   }
   canvas { display: block; }
-  #scope { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #scope { position: fixed; inset: -40px; width: calc(100% + 80px); height: calc(100% + 80px); pointer-events: none; will-change: transform; }
   #scope[hidden] { display: none; }
+  #flash {
+    position: fixed; inset: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse 60% 45% at 50% 78%, rgba(255,190,110,0.85), rgba(255,140,60,0.35) 45%, rgba(0,0,0,0) 75%);
+    mix-blend-mode: screen;
+  }
   #hud { position: fixed; inset: 0; pointer-events: none; }
   .panel {
     position: absolute; background: var(--hud-bg); border: 1px solid var(--hud-line);
@@ -37,12 +42,12 @@
   #mag { font-family: var(--num); }
   #wind { margin-top: 2px; font-variant-numeric: tabular-nums; }
   #windArrow { display: inline-block; color: var(--accent); font-weight: 700; transition: transform 0.4s; }
-  #shot b { color: var(--accent); }
-  #shot .row { font-family: var(--num); font-size: 12px; }
   #shot {
     top: calc(max(10px, env(safe-area-inset-top)) + 64px); left: max(10px, env(safe-area-inset-left));
     font-variant-numeric: tabular-nums;
   }
+  #shot b { color: var(--accent); }
+  #shot .row { font-family: var(--num); font-size: 12px; }
   #cross {
     position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px;
     border-radius: 50%; background: var(--hud-fg); box-shadow: 0 0 2px #000;
@@ -89,9 +94,10 @@
   @media (orientation: portrait) and (max-width: 820px) { #rotate.show { display: flex; } }
 </style>
 <canvas id="scope" hidden></canvas>
+<div id="flash"></div>
 <div id="hud">
   <div id="info" class="panel">
-    <div><b>M110</b>　段階③ 弾道</div>
+    <div><b>M110</b>　銃と発砲の演出</div>
     <div id="pos">横 0.0 m</div>
   </div>
   <div id="shot" class="panel" hidden>—</div>
@@ -119,21 +125,25 @@
 </div>
 
 <script type="importmap">
-{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
 </script>
 <script type="module">
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 // ---------- 基本設定（1単位 = 1m） ----------
-const RANGE_LEN = 1000;          // 標的までの最大距離
-const LANE_HALF = 30;            // 射撃レーンの半幅
-const EYE_H = 1.65;              // 目の高さ（立ち）
+const RANGE_LEN = 1000;
+const LANE_HALF = 30;
+const EYE_H = 1.65;
 const BASE_FOV = 70;
 
-// M110 の公表値（段階③の弾道計算で使う）
 const M110 = {
   muzzleVelocity: 783,   // m/s（M118LR 175gr）
-  barrel: 0.508,         // m
+  barrel: 0.508,
   magSize: 20,
   reserve: 80,
   zoomMin: 3.5, zoomMax: 10,
@@ -161,13 +171,15 @@ scene.add(new THREE.HemisphereLight(0xcfe3f5, 0x5a6b3a, 0.9));
 const sun = new THREE.DirectionalLight(0xfff1d6, 2.2);
 sun.position.set(-300, 500, 200);
 scene.add(sun);
+const muzzleLightW = new THREE.PointLight(0xffa24a, 0, 14, 2);   // 発射炎が周囲を照らす光（常に置いて明るさだけ変える）
+scene.add(muzzleLightW);
 
 // ---------- 空 ----------
 {
   const geo = new THREE.SphereGeometry(5000, 32, 16);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { top: { value: new THREE.Color(0x4f86c0) }, horizon: { value: FOG_COLOR } },
+    uniforms: { top: { value: new THREE.Color(0x3d72b0) }, horizon: { value: FOG_COLOR } },
     vertexShader: `varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
     fragmentShader: `uniform vec3 top; uniform vec3 horizon; varying vec3 vP;
       void main(){ float t = clamp(vP.y*2.2, 0.0, 1.0); gl_FragColor = vec4(mix(horizon, top, pow(t,0.7)), 1.0); }`
@@ -185,17 +197,17 @@ function vnoise(x, z) {
 }
 function fbm(x, z) { let s = 0, a = 1, f = 1; for (let i = 0; i < 4; i++) { s += a * vnoise(x * f, z * f); a *= 0.5; f *= 2; } return s / 1.875; }
 function heightAt(x, z) {
-  const side = Math.max(0, Math.abs(x) - LANE_HALF);           // レーンの外ほど起伏
+  const side = Math.max(0, Math.abs(x) - LANE_HALF);
   const sideRise = Math.min(1, side / 250);
-  let h = (fbm(x / 180, z / 180) - 0.5) * 6;                   // ゆるい起伏
+  let h = (fbm(x / 180, z / 180) - 0.5) * 6;
   h += sideRise * sideRise * 70 * fbm(x / 400 + 7, z / 400 + 3);
   const laneFlat = 1 - Math.min(1, side / 40);
   h *= 1 - laneFlat * 0.92;
-  if (z < -RANGE_LEN - 60) h += Math.min(1, (-RANGE_LEN - 60 - z) / 120) * 25; // 奥の土手
-  if (z < -1800) h += (-1800 - z) * 0.35 * fbm(x / 300, z / 300);             // 遠景の山
+  if (z < -RANGE_LEN - 60) h += Math.min(1, (-RANGE_LEN - 60 - z) / 120) * 25;
+  if (z < -1800) h += (-1800 - z) * 0.35 * fbm(x / 300, z / 300);
   return h;
 }
-const hitables = [];   // 弾が当たる物
+const hitables = [];
 {
   const size = 5000, seg = 220;
   const geo = new THREE.PlaneGeometry(size, size, seg, seg);
@@ -219,7 +231,7 @@ const hitables = [];   // 弾が当たる物
   hitables.push(ground);
 }
 
-// ---------- 木（まとめて描画して軽くする） ----------
+// ---------- 木 ----------
 {
   const COUNT = 900;
   const leaf = new THREE.InstancedMesh(new THREE.ConeGeometry(2.4, 9, 7), new THREE.MeshLambertMaterial({ color: 0x3e5a2c }), COUNT);
@@ -230,7 +242,7 @@ const hitables = [];   // 弾が当たる物
   while (n < COUNT) {
     const x = (rnd() - 0.5) * 1400, z = 60 - rnd() * 1400;
     if (Math.abs(x) < LANE_HALF + 25) continue;
-    if (fbm(x / 90, z / 90) < 0.45) continue;                     // 林のかたまりを作る
+    if (fbm(x / 90, z / 90) < 0.45) continue;
     const k = 0.7 + rnd() * 0.8, y = heightAt(x, z);
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * 6.28);
     m.compose(p.set(x, y + 2.5 + 4.5 * k, z), q, s.set(k, k, k)); leaf.setMatrixAt(n, m);
@@ -240,7 +252,7 @@ const hitables = [];   // 弾が当たる物
   scene.add(leaf, trunk);
 }
 
-// ---------- 射撃位置（コンクリートの台・屋根・射撃台） ----------
+// ---------- 射撃位置 ----------
 {
   const concrete = new THREE.MeshLambertMaterial({ color: 0xb8b4aa });
   const wood = new THREE.MeshLambertMaterial({ color: 0x8a6a48 });
@@ -258,7 +270,7 @@ const hitables = [];   // 弾が当たる物
   line.rotation.x = -Math.PI / 2; line.position.set(0, 0.21, -0.95); scene.add(line);
 }
 
-// ---------- 距離看板（100mごと） ----------
+// ---------- 距離看板 ----------
 function makeLabel(text) {
   const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
   const g = cv.getContext('2d');
@@ -290,129 +302,233 @@ function makeLabel(text) {
 }
 
 // =====================================================================
-//  M110 の3Dモデル（基本図形の組み合わせ。単位m、銃口は -z 方向）
+//  M110 の3Dモデル（単位m、銃口は -z 方向、銃身の中心軸は y=0.035）
 // =====================================================================
+const BORE_Y = 0.035;
+const MUZZLE_Z = -0.778;
+function noiseTex(size, lo, hi, seed) {
+  const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d');
+  const img = g.createImageData(size, size); let s = seed;
+  for (let i = 0; i < size * size; i++) {
+    s = (s * 16807) % 2147483647; const v = lo + (s / 2147483647) * (hi - lo);
+    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(4, 4); return t;
+}
 function buildM110() {
   const g = new THREE.Group();
-  const black = new THREE.MeshStandardMaterial({ color: 0x5a5f63, roughness: 0.55, metalness: 0.1 });
-  const poly = new THREE.MeshStandardMaterial({ color: 0x4c5053, roughness: 0.9, metalness: 0.0 });
-  const steel = new THREE.MeshStandardMaterial({ color: 0x6a6f73, roughness: 0.4, metalness: 0.25 });
-  const glass = new THREE.MeshStandardMaterial({ color: 0x24384a, roughness: 0.05, metalness: 0.9, emissive: 0x0a1420 });
-  const box = (w, h, d, mat, x, y, z, rx = 0) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m;
+  const rough = noiseTex(64, 150, 215, 7);
+  // 黒の陽極酸化アルミ・樹脂・パーカー処理の鋼・ゴム・真鍮
+  const anod = new THREE.MeshStandardMaterial({ color: 0x1b1c1e, roughness: 0.62, metalness: 0.55, roughnessMap: rough, envMapIntensity: 0.75 });
+  const poly = new THREE.MeshStandardMaterial({ color: 0x1e1f20, roughness: 0.85, metalness: 0.0, roughnessMap: rough, envMapIntensity: 0.7 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x2b2c2d, roughness: 0.5, metalness: 0.8, envMapIntensity: 1.0 });
+  const scopeM = new THREE.MeshStandardMaterial({ color: 0x161718, roughness: 0.48, metalness: 0.4, roughnessMap: rough, envMapIntensity: 1.1 });
+  const rubber = new THREE.MeshStandardMaterial({ color: 0x111112, roughness: 0.95, metalness: 0 });
+  const dark = new THREE.MeshBasicMaterial({ color: 0x050505 });
+  const lens = new THREE.MeshStandardMaterial({ color: 0x0b2a2a, roughness: 0.02, metalness: 1.0, envMapIntensity: 2.2 });
+
+  const add = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0, parent = g) => {
+    const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); parent.add(m); return m;
   };
-  const cyl = (r1, r2, len, mat, x, y, z, seg = 16) => {     // z軸方向の円柱
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, len, seg), mat);
-    m.rotation.x = Math.PI / 2; m.position.set(x, y, z); g.add(m); return m;
+  const rbox = (w, h, d, r, mat, x, y, z, rx = 0, parent = g) => add(new RoundedBoxGeometry(w, h, d, 2, r), mat, x, y, z, rx, 0, 0, parent);
+  const cylZ = (r1, r2, len, mat, x, y, z, seg = 24, parent = g) => add(new THREE.CylinderGeometry(r1, r2, len, seg), mat, x, y, z, Math.PI / 2, 0, 0, parent);
+  // 側面の輪郭 [z, y] を左右の厚みで押し出す
+  const extrude = (pts, width, mat, bevel = 0.003, parent = g) => {
+    const sh = new THREE.Shape(); sh.moveTo(-pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) sh.lineTo(-pts[i][0], pts[i][1]);
+    const geo = new THREE.ExtrudeGeometry(sh, { depth: width - bevel * 2, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 4 });
+    geo.translate(0, 0, -(width - bevel * 2) / 2); geo.rotateY(Math.PI / 2);
+    const m = new THREE.Mesh(geo, mat); parent.add(m); return m;
   };
 
-  // 銃床（伸縮式・頬当て付き）と緩衝筒
-  cyl(0.016, 0.016, 0.22, black, 0, 0.012, 0.21);
-  box(0.044, 0.07, 0.17, poly, 0, 0.012, 0.31);            // 銃床の上部
-  box(0.040, 0.03, 0.13, poly, 0, 0.06, 0.32);             // 頬当て
-  box(0.038, 0.09, 0.12, poly, 0, -0.045, 0.335, -0.42);   // 銃床の下部（斜め）
-  box(0.046, 0.15, 0.02, new THREE.MeshStandardMaterial({ color: 0x1c1d1e, roughness: 0.95 }), 0, -0.02, 0.40); // 床尾パッド
+  // ---- 銃床（調整式）と緩衝筒
+  cylZ(0.0165, 0.0165, 0.22, anod, 0, 0.018, 0.21);
+  cylZ(0.019, 0.019, 0.012, steel, 0, 0.018, 0.108, 12);               // キャッスルナット
+  extrude([[0.17, 0.036], [0.236, 0.036], [0.248, 0.074], [0.392, 0.076], [0.404, 0.07], [0.404, -0.09], [0.394, -0.098], [0.33, -0.072], [0.25, -0.026], [0.17, -0.004]], 0.042, poly, 0.004);
+  rbox(0.046, 0.172, 0.016, 0.004, rubber, 0, -0.012, 0.41);           // 床尾のゴムパッド
+  for (let i = 0; i < 6; i++) rbox(0.047, 0.004, 0.017, 0.001, rubber, 0, -0.085 + i * 0.03, 0.411);
+  rbox(0.006, 0.014, 0.03, 0.002, steel, -0.022, 0.0, 0.3);              // 長さ調整ボタン
 
-  // 機関部（下部・上部）
-  box(0.058, 0.065, 0.22, black, 0, -0.012, -0.01);
-  box(0.054, 0.058, 0.25, black, 0, 0.049, -0.015);
-  box(0.004, 0.026, 0.08, steel, 0.029, 0.045, 0.0);      // 排莢口カバー（右側）
-  cyl(0.008, 0.008, 0.03, steel, 0.031, 0.06, 0.07, 10);   // ボルト前進補助（右後ろ）
-  box(0.05, 0.012, 0.02, black, 0, 0.083, 0.11);           // 槓桿（チャージングハンドル）
-  box(0.066, 0.03, 0.10, black, 0, -0.058, -0.075);        // 弾倉の差込口
+  // ---- 下部機関部（弾倉口つき）
+  extrude([[-0.128, 0.024], [0.103, 0.024], [0.103, -0.012], [0.086, -0.034], [-0.03, -0.034], [-0.034, -0.08], [-0.128, -0.08], [-0.133, -0.062], [-0.129, -0.03]], 0.058, anod, 0.003);
+  rbox(0.064, 0.012, 0.098, 0.003, anod, 0, -0.078, -0.081);            // 弾倉口の広がり
+  for (const z of [-0.106, 0.084]) for (const sx of [-1, 1]) cylZ(0.0035, 0.0035, 0.002, steel, sx * 0.0295, 0.008, z, 10).rotation.set(0, 0, Math.PI / 2);
+  add(new THREE.CylinderGeometry(0.006, 0.006, 0.004, 12), steel, -0.031, -0.004, 0.052, 0, 0, Math.PI / 2);   // 安全装置
+  rbox(0.004, 0.006, 0.024, 0.0015, steel, -0.033, -0.004, 0.064);
+  rbox(0.004, 0.022, 0.012, 0.0015, steel, -0.031, 0.0, -0.064);          // ボルトキャッチ
+  add(new THREE.CylinderGeometry(0.0055, 0.0055, 0.006, 12), steel, 0.031, -0.018, -0.03, 0, 0, Math.PI / 2);   // 弾倉解除ボタン
+  // 用心金と引き金
+  rbox(0.014, 0.005, 0.08, 0.002, anod, 0, -0.064, 0.016);
+  rbox(0.014, 0.03, 0.006, 0.002, anod, 0, -0.05, -0.022);
+  add(new THREE.TorusGeometry(0.014, 0.0022, 6, 12, Math.PI * 0.55), steel, 0, -0.04, 0.014, 0, Math.PI / 2, Math.PI * 1.15);
+  // 握り
+  extrude([[0.032, -0.03], [0.07, -0.03], [0.108, -0.135], [0.104, -0.148], [0.078, -0.153], [0.06, -0.118], [0.053, -0.092], [0.047, -0.077], [0.04, -0.055]], 0.031, poly, 0.004);
 
-  // 弾倉（20発）
-  box(0.03, 0.165, 0.078, poly, 0, -0.145, -0.07, 0.07);
-  box(0.034, 0.012, 0.084, poly, 0, -0.226, -0.064, 0.07);
+  // ---- 上部機関部
+  rbox(0.054, 0.058, 0.25, 0.004, anod, 0, 0.052, -0.02);
+  const cover = new THREE.Group(); cover.position.set(0.0275, 0.037, -0.003); g.add(cover);   // 排莢口カバー（初弾で下に開く）
+  rbox(0.002, 0.024, 0.078, 0.0008, steel, 0.001, 0.012, 0, 0, cover);
+  rbox(0.002, 0.014, 0.05, 0.0006, dark, 0.026, 0.05, 0.0);                // 排莢口の奥
+  cylZ(0.0085, 0.0085, 0.032, anod, 0.031, 0.064, 0.078, 16);               // ボルト前進補助
+  rbox(0.012, 0.016, 0.022, 0.003, anod, 0.03, 0.074, 0.05);               // 薬莢よけ
+  rbox(0.052, 0.008, 0.024, 0.003, anod, 0, 0.074, 0.117);                 // 槓桿
+  rbox(0.062, 0.01, 0.012, 0.004, anod, 0, 0.074, 0.126);
 
-  // 握り（グリップ）と用心金・引き金
-  box(0.032, 0.115, 0.045, poly, 0, -0.085, 0.07, -0.33);
-  box(0.012, 0.006, 0.075, black, 0, -0.062, 0.018);
-  box(0.004, 0.022, 0.006, steel, 0, -0.05, 0.02, 0.2);
-
-  // ハンドガード（八角形・フリーフロート）と側面のレール
-  const hg = cyl(0.046, 0.046, 0.42, black, 0, 0.03, -0.35, 8); hg.rotation.y = Math.PI / 8;
-  for (const sx of [-1, 1]) box(0.008, 0.018, 0.40, black, sx * 0.047, 0.03, -0.35);
-  box(0.018, 0.008, 0.40, black, 0, -0.019, -0.35);
-
-  // 上面のピカティニーレール（溝付き）
-  box(0.022, 0.008, 0.66, black, 0, 0.082, -0.23);
-  const notch = new THREE.InstancedMesh(new THREE.BoxGeometry(0.023, 0.005, 0.0053), black, 66);
+  // ---- ハンドガード（四面レール・長穴）
+  rbox(0.062, 0.066, 0.42, 0.009, anod, 0, 0.042, -0.355);
+  const slot = new THREE.CapsuleGeometry(0.0045, 0.018, 3, 8);
+  for (let i = 0; i < 6; i++) for (const sx of [-1, 1]) add(slot, dark, sx * 0.0312, 0.03, -0.2 - i * 0.045, Math.PI / 2, 0, 0);
+  for (const sx of [-1, 1]) rbox(0.008, 0.016, 0.1, 0.002, anod, sx * 0.034, 0.058, -0.5);
+  rbox(0.018, 0.008, 0.38, 0.002, anod, 0, 0.006, -0.36);
+  // ---- 上面レール（溝付き）
+  rbox(0.021, 0.008, 0.69, 0.0015, anod, 0, 0.0795, -0.235);
+  const notch = new THREE.InstancedMesh(new THREE.BoxGeometry(0.0215, 0.0045, 0.0052), anod, 68);
   const mm = new THREE.Matrix4();
-  for (let i = 0; i < 66; i++) { mm.makeTranslation(0, 0.088, 0.095 - i * 0.01); notch.setMatrixAt(i, mm); }
+  for (let i = 0; i < 68; i++) { mm.makeTranslation(0, 0.0855, 0.1 - i * 0.01); notch.setMatrixAt(i, mm); }
   g.add(notch);
+  // ---- 銃身・消炎器
+  cylZ(0.0118, 0.0118, 0.15, steel, 0, BORE_Y, -0.635);
+  cylZ(0.0145, 0.0145, 0.07, steel, 0, BORE_Y, -0.743, 24);
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2 + Math.PI / 4;
+    rbox(0.0035, 0.0035, 0.04, 0.001, dark, Math.cos(a) * 0.0143, BORE_Y + Math.sin(a) * 0.0143, -0.757);
+  }
+  add(new THREE.CircleGeometry(0.0085, 16), dark, 0, BORE_Y, MUZZLE_Z + 0.0005, 0, Math.PI, 0);
+  // ---- 二脚（折りたたみ）
+  rbox(0.03, 0.018, 0.03, 0.004, steel, 0, -0.006, -0.535);
+  for (const sx of [-1, 1]) cylZ(0.0045, 0.0045, 0.2, steel, sx * 0.011, -0.015, -0.43, 8);
+  for (const sx of [-1, 1]) add(new THREE.SphereGeometry(0.0065, 8, 6), rubber, sx * 0.011, -0.015, -0.33);
 
-  // 銃身・消炎器・消音器
-  cyl(0.0115, 0.0115, 0.16, steel, 0, 0.03, -0.64);
-  cyl(0.014, 0.014, 0.04, steel, 0, 0.03, -0.735);
-  cyl(0.021, 0.021, 0.20, black, 0, 0.03, -0.85, 20);
-  cyl(0.019, 0.021, 0.012, steel, 0, 0.03, -0.954, 20);
-
-  // 二脚（折りたたみ）
-  for (const sx of [-1, 1]) cyl(0.005, 0.005, 0.22, steel, sx * 0.012, -0.03, -0.44, 8);
-  box(0.035, 0.02, 0.03, black, 0, -0.03, -0.55);
-
-  // スコープ（3.5-10倍・40mm）
+  // ---- スコープ（3.5-10倍・対物40mm・30mm筒）
   const sy = 0.132;
-  for (const rz of [-0.04, -0.19]) { box(0.03, 0.04, 0.022, black, 0, 0.108, rz); }
-  cyl(0.0152, 0.0152, 0.30, black, 0, sy, -0.12, 20);                 // 本体の筒
-  cyl(0.0152, 0.026, 0.05, black, 0, sy, -0.295, 20);                // 対物側の広がり
-  cyl(0.026, 0.026, 0.07, black, 0, sy, -0.355, 20);                 // 対物レンズ部
-  cyl(0.024, 0.024, 0.002, glass, 0, sy, -0.391, 20);
-  cyl(0.0152, 0.021, 0.04, black, 0, sy, 0.05, 20);                  // 接眼側
-  cyl(0.021, 0.021, 0.06, black, 0, sy, 0.10, 20);
-  cyl(0.019, 0.019, 0.002, glass, 0, sy, 0.131, 20);
-  const tE = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.03, 18), black); tE.position.set(0, sy + 0.028, -0.11); g.add(tE); // 上下調整ダイヤル
-  const tW = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.026, 18), black); tW.rotation.z = Math.PI / 2; tW.position.set(0.027, sy, -0.11); g.add(tW); // 左右調整ダイヤル
-  box(0.024, 0.024, 0.04, black, 0, sy, -0.11);                       // ダイヤルの台座
-  const zr = cyl(0.022, 0.022, 0.02, poly, 0, sy, 0.065, 20);         // 倍率リング
+  for (const rz of [-0.035, -0.18]) {
+    rbox(0.026, 0.026, 0.02, 0.003, anod, 0, 0.1, rz);
+    add(new THREE.TorusGeometry(0.0168, 0.0042, 8, 24), anod, 0, sy, rz);
+    rbox(0.006, 0.01, 0.018, 0.002, steel, 0.02, 0.092, rz);
+  }
+  cylZ(0.015, 0.015, 0.29, scopeM, 0, sy, -0.125, 28);
+  cylZ(0.015, 0.0255, 0.055, scopeM, 0, sy, -0.297, 28);
+  cylZ(0.0255, 0.0255, 0.07, scopeM, 0, sy, -0.359, 28);
+  cylZ(0.0262, 0.0262, 0.006, scopeM, 0, sy, -0.393, 28);
+  add(new THREE.CircleGeometry(0.0225, 24), lens, 0, sy, -0.39, 0, Math.PI, 0);
+  cylZ(0.015, 0.021, 0.035, scopeM, 0, sy, 0.035, 28);
+  const magRing = cylZ(0.0215, 0.0215, 0.028, scopeM, 0, sy, 0.066, 28);
+  for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; rbox(0.003, 0.003, 0.026, 0.001, scopeM, Math.cos(a) * 0.0218, sy + Math.sin(a) * 0.0218, 0.066); }
+  cylZ(0.021, 0.0205, 0.052, scopeM, 0, sy, 0.106, 28);
+  cylZ(0.022, 0.022, 0.008, rubber, 0, sy, 0.135, 28);
+  add(new THREE.CircleGeometry(0.0175, 24), lens, 0, sy, 0.1395);
+  rbox(0.032, 0.03, 0.05, 0.006, scopeM, 0, sy, -0.12);                  // ダイヤルの台座
+  const turret = (r, h, x, y, z, rx, rz) => {
+    const tg = new THREE.Group(); tg.position.set(x, y, z); tg.rotation.set(rx, 0, rz); g.add(tg);
+    add(new THREE.CylinderGeometry(r, r, h, 28), scopeM, 0, 0, 0, 0, 0, 0, tg);
+    for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2; rbox(0.0022, h * 0.55, 0.0022, 0.0008, scopeM, Math.cos(a) * r, h * 0.18, Math.sin(a) * r, 0, tg); }
+    add(new THREE.CylinderGeometry(r * 0.75, r * 0.75, 0.002, 20), steel, 0, h / 2 + 0.001, 0, 0, 0, 0, tg);
+  };
+  turret(0.0165, 0.034, 0, sy + 0.032, -0.12, 0, 0);                       // 上下調整（弾道用ダイヤル）
+  turret(0.0145, 0.028, 0.029, sy, -0.12, 0, -Math.PI / 2);                 // 左右調整
 
-  // 銃口の発射炎（消音器付きなので小さめ）
-  const flash = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8),
-    new THREE.MeshBasicMaterial({ color: 0xffc56a, transparent: true, opacity: 0, depthWrite: false }));
-  flash.position.set(0, 0.03, -0.98); flash.scale.set(1, 1, 2.2); g.add(flash);
-  g.userData.flash = flash;
+  // ---- 弾倉（20発・取り外して動かす）
+  const mag = new THREE.Group(); g.add(mag);
+  extrude([[-0.118, -0.06], [-0.042, -0.06], [-0.036, -0.218], [-0.114, -0.226]], 0.029, poly, 0.003, mag);
+  rbox(0.034, 0.012, 0.086, 0.004, poly, 0, -0.228, -0.077, 0.07, mag);
+  for (let i = 0; i < 3; i++) for (const sx of [-1, 1]) rbox(0.002, 0.11, 0.008, 0.001, poly, sx * 0.0148, -0.14, -0.1 + i * 0.022, 0.04, mag);
+  // 弾倉に入った弾（上から見える真鍮）
+  add(new THREE.CylinderGeometry(0.006, 0.006, 0.05, 10), new THREE.MeshStandardMaterial({ color: 0xb48a4a, metalness: 1, roughness: 0.3 }), 0.004, -0.058, -0.08, Math.PI / 2, 0, 0, mag);
+
+  // ---- 発射炎（消炎器から4方向に割れる炎＋中心の光）
+  const fl = makeFlashTex();
+  const flash = new THREE.Group(); flash.position.set(0, BORE_Y, MUZZLE_Z); g.add(flash);
+  const flashMat = new THREE.MeshBasicMaterial({ map: fl.side, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false, opacity: 0 });
+  for (let i = 0; i < 3; i++) {
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 0.2), flashMat);
+    pl.rotation.set(-Math.PI / 2, 0, 0); pl.rotateY(i * Math.PI / 3); pl.position.z = -0.095; flash.add(pl);
+  }
+  const starMat = new THREE.MeshBasicMaterial({ map: fl.star, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false, opacity: 0 });
+  const star = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.16), starMat); star.position.z = -0.03; flash.add(star);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: fl.glow, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, opacity: 0 }));
+  glow.scale.setScalar(0.22); glow.position.z = -0.04; flash.add(glow);
+  const gunLight = new THREE.PointLight(0xffa04a, 0, 2.5, 2); gunLight.position.set(0, BORE_Y + 0.02, MUZZLE_Z + 0.05); g.add(gunLight);
+
+  g.userData = { flash, flashMat, starMat, star, glow, gunLight, cover, mag, magRing };
   return g;
+}
+function makeFlashTex() {
+  const mk = (w, h, draw) => { const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; };
+  const side = mk(64, 128, (g, w, h) => {      // 横から見た炎：根元が白く、先が橙
+    for (let i = 0; i < 26; i++) {
+      const x = w / 2 + (Math.random() - 0.5) * w * 0.5, len = h * (0.45 + Math.random() * 0.5);
+      const gr = g.createLinearGradient(0, h, 0, h - len);
+      gr.addColorStop(0, 'rgba(255,250,220,0.55)'); gr.addColorStop(0.35, 'rgba(255,190,90,0.35)'); gr.addColorStop(1, 'rgba(255,110,30,0)');
+      g.fillStyle = gr; g.beginPath(); g.ellipse(x, h - len / 2, 2 + Math.random() * 5, len / 2, 0, 0, Math.PI * 2); g.fill();
+    }
+  });
+  const star = mk(128, 128, (g, w, h) => {     // 正面から見た4方向の割れ
+    g.translate(w / 2, h / 2);
+    const core = g.createRadialGradient(0, 0, 0, 0, 0, 30); core.addColorStop(0, 'rgba(255,255,235,1)'); core.addColorStop(1, 'rgba(255,170,70,0)');
+    g.fillStyle = core; g.beginPath(); g.arc(0, 0, 30, 0, Math.PI * 2); g.fill();
+    for (let i = 0; i < 4; i++) {
+      g.save(); g.rotate(i * Math.PI / 2 + Math.PI / 4);
+      const gr = g.createLinearGradient(0, 0, 60, 0); gr.addColorStop(0, 'rgba(255,230,170,0.9)'); gr.addColorStop(1, 'rgba(255,120,30,0)');
+      g.fillStyle = gr; g.beginPath(); g.moveTo(0, -7); g.lineTo(62, 0); g.lineTo(0, 7); g.fill(); g.restore();
+    }
+  });
+  const glow = mk(64, 64, (g, w) => {
+    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,240,200,1)'); gr.addColorStop(0.3, 'rgba(255,170,80,0.55)'); gr.addColorStop(1, 'rgba(255,120,40,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, w, w);
+  });
+  return { side, star, glow };
 }
 
 // 銃は手前に別で描く（地形にめり込まないように）
 const gunScene = new THREE.Scene();
 const gunCam = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.01, 10);
-gunScene.add(new THREE.HemisphereLight(0xdfeaf5, 0x4a5530, 1.6));
-const gunSun = new THREE.DirectionalLight(0xfff1d6, 3.2); gunSun.position.set(-1, 2, 1.5); gunScene.add(gunSun);
-const gunFill = new THREE.DirectionalLight(0xbfd2e6, 0.8); gunFill.position.set(1.5, 0.3, -1); gunScene.add(gunFill);
+{
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  gunScene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+}
+gunScene.add(new THREE.HemisphereLight(0xdfeaf5, 0x4a5530, 0.5));
+const gunSun = new THREE.DirectionalLight(0xfff1d6, 2.4); gunSun.position.set(-1, 2, 1.5); gunScene.add(gunSun);
+const gunRim = new THREE.DirectionalLight(0xbfd2e6, 1.2); gunRim.position.set(1.5, 0.6, -1.5); gunScene.add(gunRim);
 const gun = buildM110();
 gunScene.add(gun);
-const HIP = { pos: new THREE.Vector3(0.2, -0.19, -0.6), rot: new THREE.Euler(0.02, 0.05, 0.0) };
+const HIP = { pos: new THREE.Vector3(0.2, -0.19, -0.62), rot: new THREE.Euler(0.02, 0.05, 0.0) };
 const AIM = { pos: new THREE.Vector3(0.0, -0.132, -0.22), rot: new THREE.Euler(0, 0, 0) };
 
+// 空薬莢（排莢口から右へ飛ぶ）
+const brassMat = new THREE.MeshStandardMaterial({ color: 0xc09050, metalness: 1, roughness: 0.28, envMapIntensity: 1.4 });
+const brassGeo = (() => {
+  const pts = [[0, -0.0255], [0.0059, -0.0255], [0.0059, -0.0235], [0.0052, -0.022], [0.006, -0.02], [0.0058, 0.012], [0.0044, 0.016], [0.0044, 0.0255], [0.0038, 0.0255]].map(([r, y]) => new THREE.Vector2(r, y));
+  return new THREE.LatheGeometry(pts, 14);
+})();
+const shells = [];
+for (let i = 0; i < 8; i++) { const m = new THREE.Mesh(brassGeo, brassMat); m.visible = false; gunScene.add(m); shells.push({ m, t: 0, v: new THREE.Vector3(), w: new THREE.Vector3() }); }
+let shellIdx = 0;
+
 // =====================================================================
-//  スコープ表示（ミルドット照準。目盛り＝1ミル間隔、倍率に合わせて拡大縮小）
+//  スコープ表示（ミルドット照準）
 // =====================================================================
 const scopeCv = document.getElementById('scope');
 const sctx = scopeCv.getContext('2d');
 const zoomEl = document.getElementById('zoomv');
+const flashEl = document.getElementById('flash');
 let zoom = 10;
-// 視野の広さ：3.5倍で約5.7°、10倍で約2.0°（同クラスのスコープの公表値に近い値）
 const scopeFovDeg = () => 20 / zoom;
 function scopeRadiusPx() { return Math.min(innerWidth, innerHeight) * 0.47; }
 function drawScope() {
   const dpr = Math.min(devicePixelRatio, 2);
-  const W = innerWidth, H = innerHeight;
-  if (scopeCv.width !== W * dpr) { scopeCv.width = W * dpr; scopeCv.height = H * dpr; }
+  const PAD = 40, W = innerWidth + PAD * 2, H = innerHeight + PAD * 2;
+  if (scopeCv.width !== Math.round(W * dpr)) { scopeCv.width = Math.round(W * dpr); scopeCv.height = Math.round(H * dpr); }
   const c = sctx; c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
   const cx = W / 2, cy = H / 2, r = scopeRadiusPx();
-  // 外側を黒く塗る
   c.fillStyle = '#050505'; c.beginPath(); c.rect(0, 0, W, H); c.arc(cx, cy, r, 0, Math.PI * 2, true); c.fill();
-  // レンズのふち（暗い輪）
   const vg = c.createRadialGradient(cx, cy, r * 0.82, cx, cy, r);
   vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.75)');
   c.fillStyle = vg; c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
-  // 照準線
   const pxPerMil = (2 * r) / (scopeFovDeg() * Math.PI / 180 * 1000);
   c.save(); c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.clip();
-  c.strokeStyle = '#0b0b0b'; c.fillStyle = '#0b0b0b';
-  c.lineWidth = 1.2;
+  c.strokeStyle = '#0b0b0b'; c.fillStyle = '#0b0b0b'; c.lineWidth = 1.2;
   c.beginPath(); c.moveTo(cx - r, cy); c.lineTo(cx + r, cy); c.moveTo(cx, cy - r); c.lineTo(cx, cy + r); c.stroke();
   const post = 5 * pxPerMil, thick = Math.max(4, pxPerMil * 0.22);
   c.fillRect(cx - r, cy - thick / 2, r - post, thick); c.fillRect(cx + post, cy - thick / 2, r - post, thick);
@@ -424,9 +540,8 @@ function drawScope() {
     c.beginPath(); c.arc(cx, cy + i * pxPerMil, dotR, 0, Math.PI * 2); c.fill();
   }
   c.restore();
-  // 目盛りの説明
   c.fillStyle = 'rgba(238,240,232,0.75)'; c.font = '11px ui-monospace, Menlo, monospace'; c.textAlign = 'center';
-  c.fillText('点の間隔 = 1ミル（100mで10cm）', cx, cy + r + 14 > H - 4 ? H - 6 : cy + r + 14);
+  c.fillText('点の間隔 = 1ミル（100mで10cm）', cx, Math.min(cy + r + 14, H - PAD - 6));
   zoomEl.textContent = zoom.toFixed(1) + 'x';
 }
 
@@ -434,16 +549,17 @@ function drawScope() {
 //  状態・操作
 // =====================================================================
 const S = {
-  aiming: false, aimT: 0,          // 0=腰だめ 1=スコープ
+  aiming: false, aimT: 0,
   mag: M110.magSize, reserve: M110.reserve,
-  reloading: 0, lastShot: -1,
-  recoil: 0, recoilV: 0,           // 視点の跳ね上がり（ラジアン）
-  kick: 0,                          // 銃の後退（表示用）
+  reloading: 0, reloadLen: 0, boltLocked: false, lastShot: -1, shots: 0,
+  rp: 0, rpv: 0, ry: 0, ryv: 0,     // 反動：視点の上下・左右（ばね）
+  kick: 0, kickV: 0,                 // 銃の後退（ばね）
+  shake: 0, scopeKick: 0, scopeKickV: 0, flashT: 0,
 };
 const move = { x: 0, y: 0 };
 let yaw = 0, pitch = 0;
 const stickBase = document.getElementById('stick-base'), stickKnob = document.getElementById('stick-knob');
-const touches = new Map();  // id -> {type, sx, sy, lx, ly}
+const touches = new Map();
 const LOOK_SENS = 0.0042;
 const ammoEl = document.getElementById('ammo'), shotEl = document.getElementById('shot');
 const adsBtn = document.getElementById('ads'), zoomBox = document.getElementById('zoom');
@@ -457,7 +573,7 @@ function updateAmmo() {
 function onDown(id, x, y, force) {
   const type = force || (x < innerWidth * 0.45 ? 'move' : 'look');
   for (const t of touches.values()) if (t.type === type) return;
-  if (type === 'move' && S.aiming) return;   // スコープ中は動かない
+  if (type === 'move' && S.aiming) return;
   touches.set(id, { type, sx: x, sy: y, lx: x, ly: y });
   if (type === 'move') {
     stickBase.style.display = stickKnob.style.display = 'block';
@@ -473,7 +589,7 @@ function onMoveP(id, x, y) {
     move.x = dx / max; move.y = dy / max;
     stickKnob.style.left = (t.sx + dx) + 'px'; stickKnob.style.top = (t.sy + dy) + 'px';
   } else {
-    const k = LOOK_SENS * (camera.fov / BASE_FOV) * (S.aiming ? 1.25 : 1);   // 倍率が高いほどゆっくり
+    const k = LOOK_SENS * (camera.fov / BASE_FOV) * (S.aiming ? 1.25 : 1);
     yaw -= (x - t.lx) * k; pitch -= (y - t.ly) * k;
     pitch = Math.max(-1.3, Math.min(1.3, pitch));
   }
@@ -503,7 +619,6 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => keys[e.code] = false);
 
-// ボタン：押した指はそのまま視点ドラッグにも使える
 function bindBtn(el, fn, dragLook) {
   el.addEventListener('touchstart', e => {
     e.preventDefault(); e.stopPropagation(); ensureAudio(); fn();
@@ -525,53 +640,114 @@ function toggleAim() {
   adsBtn.classList.toggle('on', S.aiming);
   if (S.aiming) { for (const [id, t] of touches) if (t.type === 'move') onUp(id); }
 }
+// リロード：弾倉を抜く→新しい弾倉を差す→（弾切れ時は）ボルトを戻す
 function reload() {
   if (S.reloading > 0 || S.mag === M110.magSize || S.reserve === 0) return;
   if (S.aiming) toggleAim();
-  S.reloading = 2.6;
-  playClick(0.0); playClick(1.1); playClick(2.2);
+  S.reloadLen = S.reloading = S.boltLocked ? 3.0 : 2.4;
+  sfx.magOut?.(0.45); sfx.magIn?.(1.55);
+  if (S.boltLocked) sfx.boltRelease?.(2.25);
 }
 
-// ---------- 音（その場で合成。最初のタップ後に鳴る） ----------
-let actx = null;
+// =====================================================================
+//  音（その場で合成。最初のタップ後に鳴る）
+// =====================================================================
+let actx = null, bus = null;
+const sfx = {};
 function ensureAudio() {
   if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
-  try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { actx = null; }
+  try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { actx = null; return; }
+  buildAudio();
 }
-function noiseBuf(sec) {
-  const b = actx.createBuffer(1, actx.sampleRate * sec, actx.sampleRate), d = b.getChannelData(0);
-  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-  return b;
-}
-function playShot() {
-  if (!actx) return;
-  const t = actx.currentTime;
-  const src = actx.createBufferSource(); src.buffer = noiseBuf(0.5);
-  const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(2400, t); lp.frequency.exponentialRampToValueAtTime(180, t + 0.35);
-  const gn = actx.createGain(); gn.gain.setValueAtTime(0.9, t); gn.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
-  src.connect(lp).connect(gn).connect(actx.destination); src.start(t);
-  const o = actx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.15);
-  const og = actx.createGain(); og.gain.setValueAtTime(0.6, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
-  o.connect(og).connect(actx.destination); o.start(t); o.stop(t + 0.2);
-}
-function playClick(delay) {
-  if (!actx) return;
-  const t = actx.currentTime + delay;
-  const src = actx.createBufferSource(); src.buffer = noiseBuf(0.05);
-  const hp = actx.createBiquadFilter(); hp.type = 'bandpass'; hp.frequency.value = 2800; hp.Q.value = 3;
-  const gn = actx.createGain(); gn.gain.setValueAtTime(0.5, t); gn.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
-  src.connect(hp).connect(gn).connect(actx.destination); src.start(t);
-}
-function playImpact(delay) {
-  if (!actx) return;
-  const t = actx.currentTime + delay;
-  const src = actx.createBufferSource(); src.buffer = noiseBuf(0.15);
-  const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700;
-  const gn = actx.createGain(); gn.gain.setValueAtTime(0.25, t); gn.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-  src.connect(lp).connect(gn).connect(actx.destination); src.start(t);
+function buildAudio() {
+  const A = actx;
+  const comp = A.createDynamicsCompressor();
+  comp.threshold.value = -14; comp.knee.value = 6; comp.ratio.value = 6; comp.attack.value = 0.002; comp.release.value = 0.25;
+  const master = A.createGain(); master.gain.value = 0.9;
+  comp.connect(master).connect(A.destination);
+  // 屋外の残響（山に跳ね返って転がる音）
+  const irLen = 3.2, ir = A.createBuffer(2, A.sampleRate * irLen, A.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch);
+    for (let i = 0; i < d.length; i++) { const t = i / A.sampleRate; d[i] = (Math.random() * 2 - 1) * Math.exp(-t / 0.75) * (t < 0.02 ? t / 0.02 : 1) * 0.6; }
+    for (const [tt, gg] of [[0.32, 0.8], [0.61, 0.55], [0.95, 0.4], [1.42, 0.3], [2.1, 0.18]]) {   // 遠くの斜面からのこだま
+      const s0 = Math.floor((tt + (ch ? 0.04 : 0)) * A.sampleRate);
+      for (let k = 0; k < 2200; k++) d[s0 + k] += (Math.random() * 2 - 1) * gg * Math.exp(-k / 500);
+    }
+  }
+  const verb = A.createConvolver(); verb.buffer = ir;
+  const verbLP = A.createBiquadFilter(); verbLP.type = 'lowpass'; verbLP.frequency.value = 1800;
+  const wet = A.createGain(); wet.gain.value = 0.55;
+  verb.connect(verbLP).connect(wet).connect(comp);
+  const noise = A.createBuffer(1, A.sampleRate * 2, A.sampleRate);
+  { const d = noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+  const shaper = A.createWaveShaper();
+  { const n = 1024, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(x * 3); } shaper.curve = c; }
+  shaper.connect(comp);
+  bus = { comp, verb, noise, shaper };
+
+  const nz = (t, dur, gain, filt, f0, f1, q, dest, send = 0, pan = 0) => {
+    const s = A.createBufferSource(); s.buffer = noise; s.loopStart = 0;
+    const f = A.createBiquadFilter(); f.type = filt; f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t); if (f1 !== f0) f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = A.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.0015); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const p = A.createStereoPanner ? A.createStereoPanner() : null;
+    s.connect(f).connect(g);
+    let out = g; if (p) { p.pan.value = pan; g.connect(p); out = p; }
+    out.connect(dest || comp);
+    if (send) { const sg = A.createGain(); sg.gain.value = send; out.connect(sg).connect(verb); }
+    s.start(t, Math.random() * 1.5); s.stop(t + dur + 0.05);
+  };
+  const tone = (t, type, f0, f1, dur, gain, dest, send = 0) => {
+    const o = A.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = A.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(dest || comp);
+    if (send) { const sg = A.createGain(); sg.gain.value = send; g.connect(sg).connect(verb); }
+    o.start(t); o.stop(t + dur + 0.05);
+  };
+  const ping = (t, freqs, gain, dur) => { for (const f of freqs) tone(t, 'sine', f, f * 0.995, dur * (0.6 + Math.random() * 0.6), gain); };
+
+  sfx.shot = () => {
+    const t = A.currentTime + 0.005;
+    nz(t, 0.035, 1.0, 'highpass', 1800, 1800, 0.7, null, 0.9, 0.05);           // 衝撃波の「パン」
+    nz(t, 0.5, 1.0, 'lowpass', 7000, 220, 0.8, null, 1.3, 0);                   // 発射ガスの爆風
+    nz(t + 0.004, 0.22, 0.7, 'bandpass', 900, 300, 1.2, null, 0.6, 0);          // 胴鳴り
+    tone(t, 'sine', 95, 34, 0.32, 1.0, shaper, 0.2);                             // 腹に響く低音
+    tone(t, 'triangle', 180, 60, 0.12, 0.45, shaper);
+    // 作動音（ボルトの後退と前進）
+    nz(t + 0.018, 0.02, 0.35, 'bandpass', 2400, 2400, 5, null, 0, 0.3);
+    nz(t + 0.055, 0.028, 0.4, 'bandpass', 3600, 3000, 7, null, 0, 0.3);
+    tone(t + 0.055, 'square', 1700, 1500, 0.04, 0.025);
+  };
+  sfx.brass = (delay) => {                                                        // 空薬莢がコンクリートに落ちる
+    const t = A.currentTime + delay;
+    ping(t, [4150, 6420, 9050], 0.07, 0.16);
+    ping(t + 0.13, [4150, 6420, 9050], 0.035, 0.1);
+    ping(t + 0.22, [4150, 6420], 0.018, 0.07);
+    nz(t + 0.3, 0.05, 0.02, 'bandpass', 5000, 5000, 3);
+  };
+  sfx.dry = () => { const t = A.currentTime; nz(t, 0.02, 0.3, 'bandpass', 2600, 2600, 6); };
+  sfx.magOut = d => { const t = A.currentTime + d; nz(t, 0.025, 0.4, 'bandpass', 2000, 2000, 5); nz(t + 0.05, 0.08, 0.2, 'bandpass', 900, 600, 2); };
+  sfx.magIn = d => { const t = A.currentTime + d; nz(t, 0.03, 0.55, 'bandpass', 1500, 1500, 4); nz(t + 0.035, 0.02, 0.5, 'bandpass', 3200, 3200, 7); };
+  sfx.boltRelease = d => { const t = A.currentTime + d; nz(t, 0.035, 0.7, 'bandpass', 2200, 1800, 4, null, 0.15); tone(t, 'square', 1300, 1100, 0.05, 0.03); };
+  sfx.impact = (delay, gain) => { const t = A.currentTime + delay; nz(t, 0.18, 0.25 * gain, 'lowpass', 900, 300, 0.7, null, 0.4); };
 }
 
-// ---------- 着弾の土煙 ----------
+// =====================================================================
+//  硝煙・土煙（世界の中に残る煙。風に流される）
+// =====================================================================
+const smokeTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+  for (let i = 0; i < 40; i++) {
+    const x = 64 + (Math.random() - 0.5) * 60, y = 64 + (Math.random() - 0.5) * 60, r = 14 + Math.random() * 26;
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, 'rgba(255,255,255,0.22)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  const m = g.createRadialGradient(64, 64, 20, 64, 64, 64); m.addColorStop(0, 'rgba(0,0,0,0)'); m.addColorStop(1, 'rgba(0,0,0,1)');
+  g.globalCompositeOperation = 'destination-out'; g.fillStyle = m; g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+})();
 const dustTex = (() => {
   const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
   const gr = g.createRadialGradient(32, 32, 2, 32, 32, 32);
@@ -579,40 +755,44 @@ const dustTex = (() => {
   g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
   return new THREE.CanvasTexture(c);
 })();
+const smoke = [];
+const SMOKE_MAX = 90;
+for (let i = 0; i < SMOKE_MAX; i++) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, color: 0xd8d6d0, transparent: true, depthWrite: false, opacity: 0, fog: true }));
+  sp.visible = false; scene.add(sp);
+  smoke.push({ sp, t: 0, life: 1, p: new THREE.Vector3(), v: new THREE.Vector3(), s0: 0.1, s1: 1, a: 0.3, rot: 0 });
+}
+let smokeIdx = 0;
+function emitSmoke(pos, vel, life, s0, s1, alpha, color = 0xd8d6d0) {
+  const s = smoke[smokeIdx]; smokeIdx = (smokeIdx + 1) % SMOKE_MAX;
+  s.p.copy(pos); s.v.copy(vel); s.t = 0; s.life = life; s.s0 = s0; s.s1 = s1; s.a = alpha;
+  s.sp.material.color.setHex(color); s.sp.material.rotation = Math.random() * 6.28; s.rot = (Math.random() - 0.5) * 0.6;
+  s.sp.visible = true; s.sp.position.copy(pos);
+}
 const puffs = [];
-function spawnPuff(p, delay) {
+function spawnPuff(p) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dustTex, transparent: true, depthWrite: false, opacity: 0 }));
   sp.position.copy(p); sp.scale.setScalar(0.01); scene.add(sp);
-  puffs.push({ sp, t: -delay, y0: p.y });
+  puffs.push({ sp, t: 0, y0: p.y });
 }
 
 // =====================================================================
-//  弾道計算：重力＋空気抵抗（G7標準弾の抵抗表）＋風。1ミリ秒刻みで数値計算
+//  弾道計算：重力＋空気抵抗（G7）＋風。1ミリ秒刻み
 // =====================================================================
-const BALL = {
-  bcG7: 0.25,        // 弾道係数 G7（175gr SMK の販売店掲載値）
-  sightH: 0.065,     // スコープ中心と銃身の高さの差（m）
-  zeroRange: 100,    // 100mで照準と弾道が一致するよう調整済み
-  rho: 1.225,        // 空気密度（15℃・海面の標準大気）
-  sound: 340.3,      // 音速（m/s）
-  g: 9.80665,
-  mass: 0.01134,     // 175グレイン（kg）
-};
-// G7標準弾の抵抗係数（マッハ数, 抵抗係数）
+const BALL = { bcG7: 0.25, sightH: 0.065, zeroRange: 100, rho: 1.225, sound: 340.3, g: 9.80665, mass: 0.01134 };
 const G7 = [[0,.1198],[.05,.1197],[.1,.1196],[.15,.1194],[.2,.1193],[.25,.1194],[.3,.1194],[.35,.1194],[.4,.1193],[.45,.1193],[.5,.1194],[.55,.1193],[.6,.1194],[.65,.1197],[.7,.1202],[.725,.1207],[.75,.1215],[.775,.1226],[.8,.1242],[.825,.1266],[.85,.1306],[.875,.1368],[.9,.1464],[.925,.166],[.95,.2054],[.975,.2993],[1,.3803],[1.025,.4015],[1.05,.4043],[1.075,.4034],[1.1,.4014],[1.125,.3987],[1.15,.3955],[1.2,.3884],[1.25,.381],[1.3,.3732],[1.35,.3657],[1.4,.358],[1.5,.344],[1.55,.3376],[1.6,.3315],[1.65,.326],[1.7,.3209],[1.75,.316],[1.8,.3117],[1.85,.3078],[1.9,.3042],[1.95,.301],[2,.298],[2.05,.2951],[2.1,.2922],[2.15,.2892],[2.2,.2864],[2.25,.2835],[2.3,.2807],[2.35,.2779],[2.4,.2752],[2.45,.2725],[2.5,.2697],[2.6,.2643],[2.7,.2588],[2.8,.2533],[2.9,.2479],[3,.2424]];
 function g7cd(M) {
   if (M <= 0) return G7[0][1];
   for (let i = 1; i < G7.length; i++) if (M <= G7[i][0]) { const [m0, c0] = G7[i - 1], [m1, c1] = G7[i]; return c0 + (c1 - c0) * (M - m0) / (m1 - m0); }
   return G7[G7.length - 1][1];
 }
-const KDRAG = BALL.rho * Math.PI / (8 * BALL.bcG7 * 703.0696);   // 703.07 = lb/in² → kg/m²
+const KDRAG = BALL.rho * Math.PI / (8 * BALL.bcG7 * 703.0696);
 function stepBullet(b, w, h) {
   const rx = b.v[0] - w[0], ry = b.v[1] - w[1], rz = b.v[2] - w[2];
   const sp = Math.hypot(rx, ry, rz), a = KDRAG * g7cd(sp / BALL.sound) * sp;
   b.v[0] -= a * rx * h; b.v[1] -= (a * ry + BALL.g) * h; b.v[2] -= a * rz * h;
   b.p[0] += b.v[0] * h; b.p[1] += b.v[1] * h; b.p[2] += b.v[2] * h;
 }
-// 100mで照準と弾道が一致する銃身の上向き角度を求める
 function computeZero() {
   const NO_WIND = [0, 0, 0];
   const yAt = ang => {
@@ -626,14 +806,13 @@ function computeZero() {
 }
 const ZERO_ANGLE = computeZero();
 
-// ---------- 風（ゆっくり強弱が変わる） ----------
+// ---------- 風 ----------
 const wind = { base: 1 + Math.random() * 4, from0: Math.random() * Math.PI * 2, speed: 0, from: 0, vec: [0, 0, 0] };
 const windTxt = document.getElementById('windTxt'), windArrow = document.getElementById('windArrow');
 let windUiT = 0;
 function updateWind(t, dt) {
   wind.speed = Math.max(0, wind.base * (1 + 0.25 * Math.sin(t * 0.37) + 0.15 * Math.sin(t * 1.1 + 2)));
   wind.from = wind.from0 + 0.2 * Math.sin(t * 0.13);
-  // from=0 は正面（12時＝標的側）から吹く風。時計回りに 3時＝右から
   const fx = Math.sin(wind.from), fz = -Math.cos(wind.from);
   wind.vec[0] = -fx * wind.speed; wind.vec[1] = 0; wind.vec[2] = -fz * wind.speed;
   windUiT -= dt;
@@ -641,22 +820,94 @@ function updateWind(t, dt) {
     windUiT = 0.5;
     let clock = Math.round(((wind.from % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / (Math.PI / 6)) % 12; if (clock === 0) clock = 12;
     windTxt.textContent = `風 ${wind.speed.toFixed(1)} m/s・${clock}時から`;
-    const deg = Math.atan2(wind.vec[0], -wind.vec[2]) * 180 / Math.PI;   // 画面の上＝標的側
+    const deg = Math.atan2(wind.vec[0], -wind.vec[2]) * 180 / Math.PI;
     windArrow.style.transform = `rotate(${deg}deg)`;
   }
+}
+
+// =====================================================================
+//  弾筋：弾の通り道の空気がゆがむ（画面をずらして屈折させる）
+// =====================================================================
+const TRAIL_SEC = 0.6, TRAIL_MAX = 120;
+const traceScene = new THREE.Scene();
+const sceneRT = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 4 });
+const traceUniforms = { tScene: { value: sceneRT.texture }, uRes: { value: new THREE.Vector2(4, 4) }, uTime: { value: 0 }, uStrength: { value: 16 } };
+const traceMat = new THREE.ShaderMaterial({
+  uniforms: traceUniforms, transparent: false, depthTest: false, depthWrite: false, side: THREE.DoubleSide,
+  vertexShader: `
+    attribute float aAlpha; attribute float aSide; attribute float aDist;
+    varying float vAlpha; varying float vSide; varying float vDist;
+    void main(){ vAlpha=aAlpha; vSide=aSide; vDist=aDist; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tScene; uniform vec2 uRes; uniform float uTime; uniform float uStrength;
+    varying float vAlpha; varying float vSide; varying float vDist;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+    float n2(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);
+      return mix(mix(h(i),h(i+vec2(1,0)),u.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),u.x), u.y); }
+    void main(){
+      float across = 1.0 - abs(vSide);
+      float a = vAlpha * smoothstep(0.0, 0.7, across);
+      vec2 q = vec2(vDist*0.35 - uTime*9.0, vSide*1.6);
+      vec2 n = vec2(n2(q), n2(q+vec2(19.3,7.1))) - 0.5;
+      n += 0.6*(vec2(n2(q*2.7+5.0), n2(q*2.7+41.0)) - 0.5);
+      vec2 uv = gl_FragCoord.xy / uRes + n * uStrength * a / uRes;
+      vec3 c = texture2D(tScene, uv).rgb;
+      c *= 1.0 + 0.38 * a * n.x;                     // 揺らぎで明暗が出る
+      c += vec3(0.035) * a * (0.6 + n.y);            // 薄い白いもや
+      gl_FragColor = vec4(c, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`
+});
+function makeTrail() {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_MAX * 2 * 3), 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('aAlpha', new THREE.BufferAttribute(new Float32Array(TRAIL_MAX * 2), 1).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('aSide', new THREE.BufferAttribute(new Float32Array(TRAIL_MAX * 2), 1));
+  geo.setAttribute('aDist', new THREE.BufferAttribute(new Float32Array(TRAIL_MAX * 2), 1).setUsage(THREE.DynamicDrawUsage));
+  const side = geo.attributes.aSide.array; for (let i = 0; i < TRAIL_MAX; i++) { side[i * 2] = -1; side[i * 2 + 1] = 1; }
+  const idx = []; for (let i = 0; i < TRAIL_MAX - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  geo.setIndex(idx);
+  const mesh = new THREE.Mesh(geo, traceMat); mesh.frustumCulled = false; traceScene.add(mesh);
+  return { mesh, pts: [], dead: -1 };
+}
+const trails = [];
+const tv = { a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), d: new THREE.Vector3() };
+function updateTrail(tr, now, pxW) {
+  // 古い点を捨てる
+  while (tr.pts.length > 2 && now - tr.pts[0].t > TRAIL_SEC) tr.pts.shift();
+  while (tr.pts.length > TRAIL_MAX) tr.pts.shift();
+  const geo = tr.mesh.geometry, P = geo.attributes.position.array, A = geo.attributes.aAlpha.array, D = geo.attributes.aDist.array;
+  const n = tr.pts.length, deadFade = tr.dead < 0 ? 1 : Math.max(0, 1 - (now - tr.dead) / 0.35);
+  for (let i = 0; i < n; i++) {
+    const p = tr.pts[i].p, prev = tr.pts[Math.max(0, i - 1)].p, next = tr.pts[Math.min(n - 1, i + 1)].p;
+    tv.a.subVectors(next, prev).normalize();                       // 進行方向
+    tv.b.subVectors(camera.position, p);
+    const dist = tv.b.length(); tv.b.divideScalar(dist || 1);
+    tv.c.crossVectors(tv.a, tv.b);
+    if (tv.c.lengthSq() < 1e-6) tv.c.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    tv.c.normalize();
+    const w = Math.min(3, Math.max(0.06, dist * pxW));             // 画面上でおよそ一定の太さ
+    const age = (now - tr.pts[i].t) / TRAIL_SEC;
+    const fadeIn = Math.min(1, dist / 3);                          // 銃口のすぐ前は弱く
+    const a = Math.pow(Math.max(0, 1 - age), 0.6) * deadFade * fadeIn;
+    for (let s = 0; s < 2; s++) {
+      const k = (i * 2 + s) * 3, sg = s ? 1 : -1;
+      P[k] = p.x + tv.c.x * w * sg; P[k + 1] = p.y + tv.c.y * w * sg; P[k + 2] = p.z + tv.c.z * w * sg;
+      A[i * 2 + s] = a; D[i * 2 + s] = tr.pts[i].d;
+    }
+  }
+  geo.attributes.position.needsUpdate = geo.attributes.aAlpha.needsUpdate = geo.attributes.aDist.needsUpdate = true;
+  geo.setDrawRange(0, Math.max(0, (n - 1) * 6));
+  return deadFade > 0;
 }
 
 // ---------- 弾の飛行 ----------
 const ray = new THREE.Raycaster();
 const tmpV = new THREE.Vector3();
-const traceTex = (() => {
-  const c = document.createElement('canvas'); c.width = c.height = 32; const g = c.getContext('2d');
-  const gr = g.createRadialGradient(16, 16, 0, 16, 16, 16);
-  gr.addColorStop(0, 'rgba(255,250,225,1)'); gr.addColorStop(0.4, 'rgba(255,235,180,0.5)'); gr.addColorStop(1, 'rgba(255,235,180,0)');
-  g.fillStyle = gr; g.fillRect(0, 0, 32, 32); return new THREE.CanvasTexture(c);
-})();
 const bullets = [];
 const segA = new THREE.Vector3(), segB = new THREE.Vector3(), segD = new THREE.Vector3();
+let simNow = 0;
 function launchBullet() {
   camera.updateMatrixWorld();
   const q = camera.quaternion;
@@ -664,11 +915,10 @@ function launchBullet() {
   const o = camera.position.clone().addScaledVector(u, -BALL.sightH);
   const dir = f.clone().applyAxisAngle(r, ZERO_ANGLE);
   const v0 = M110.muzzleVelocity;
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: traceTex, transparent: true, depthWrite: false, sizeAttenuation: false, blending: THREE.AdditiveBlending, opacity: 0.9 }));
-  sp.scale.setScalar(0.014); sp.position.copy(o); scene.add(sp);
-  bullets.push({ p: [o.x, o.y, o.z], v: [dir.x * v0, dir.y * v0, dir.z * v0], t: 0, o, eye: camera.position.clone(), f, u, r, sp });
+  const tr = makeTrail(); trails.push(tr);
+  tr.pts.push({ p: o.clone().addScaledVector(dir, 0.8), t: simNow, d: 0.8 });
+  bullets.push({ p: [o.x, o.y, o.z], v: [dir.x * v0, dir.y * v0, dir.z * v0], t: 0, o, eye: camera.position.clone(), f, u, r, tr, dist: 0 });
 }
-function endBullet(i) { const b = bullets[i]; scene.remove(b.sp); b.sp.material.dispose(); bullets.splice(i, 1); }
 function updateBullets(dt) {
   const objs = hitables.filter(o => o.name !== 'ground');
   for (let i = bullets.length - 1; i >= 0; i--) {
@@ -679,16 +929,18 @@ function updateBullets(dt) {
     for (let k = 0; k < n; k++) {
       const px = b.p[0], py = b.p[1], pz = b.p[2];
       stepBullet(b, wind.vec, h); b.t += h;
+      if (window.__freezeAt && b.t > window.__freezeAt) { window.__freezeAt = 0; window.__freezeFx = true; }
+      b.dist += Math.hypot(b.p[0] - px, b.p[1] - py, b.p[2] - pz);
+      if (k % 6 === 5) b.tr.pts.push({ p: new THREE.Vector3(b.p[0], b.p[1], b.p[2]), t: simNow - dt + (k + 1) * h, d: b.dist });
       const gh = heightAt(b.p[0], b.p[2]);
       if (b.p[1] <= gh) {
-        const g0 = py - heightAt(px, pz), g1 = b.p[1] - gh, s = g0 / (g0 - g1 || 1);   // 地面との交点を補間
+        const g0 = py - heightAt(px, pz), g1 = b.p[1] - gh, s = g0 / (g0 - g1 || 1);
         groundHit = new THREE.Vector3(px + (b.p[0] - px) * s, py + (b.p[1] - py) * s, pz + (b.p[2] - pz) * s);
         break;
       }
     }
     segB.set(b.p[0], b.p[1], b.p[2]);
     if (groundHit) segB.copy(groundHit);
-    // 看板・杭など（この1コマで進んだ区間を線分として判定）
     segD.subVectors(segB, segA); const len = segD.length();
     let hit = null;
     if (len > 0) {
@@ -697,10 +949,13 @@ function updateBullets(dt) {
       if (h0) hit = { point: h0.point, what: h0.object.userData.kind || '標的' };
     }
     if (!hit && groundHit) hit = { point: groundHit, what: '地面' };
-    if (hit) { reportImpact(b, hit); endBullet(i); continue; }
-    b.sp.position.set(b.p[0], b.p[1], b.p[2]);
-    b.sp.material.opacity = Math.max(0.25, 0.9 - b.t * 0.3);
-    if (b.t > 5 || -b.p[2] > 3000) { shotEl.innerHTML = '着弾なし（見失った）'; endBullet(i); }
+    if (hit) {
+      b.tr.pts.push({ p: hit.point.clone(), t: simNow, d: b.dist });
+      b.tr.dead = simNow;
+      reportImpact(b, hit); bullets.splice(i, 1); continue;
+    }
+    b.tr.pts.push({ p: new THREE.Vector3(b.p[0], b.p[1], b.p[2]), t: simNow, d: b.dist });
+    if (b.t > 5 || -b.p[2] > 3000) { shotEl.innerHTML = '着弾なし（見失った）'; b.tr.dead = simNow; bullets.splice(i, 1); }
   }
 }
 function reportImpact(b, hit) {
@@ -709,8 +964,10 @@ function reportImpact(b, hit) {
   const range = Math.hypot(hit.point.x - b.o.x, hit.point.z - b.o.z);
   const milV = Math.atan2(up, fwd) * 1000, milH = Math.atan2(rt, fwd) * 1000;
   const v = Math.hypot(b.v[0], b.v[1], b.v[2]), J = 0.5 * BALL.mass * v * v;
-  spawnPuff(hit.point.clone(), 0);
-  playImpact(range / BALL.sound);
+  spawnPuff(hit.point.clone());
+  for (let i = 0; i < 4; i++) emitSmoke(hit.point.clone().add(tmpV.set((Math.random() - 0.5) * 0.6, 0.2, (Math.random() - 0.5) * 0.6)),
+    new THREE.Vector3((Math.random() - 0.5) * 1.2, 1.2 + Math.random(), (Math.random() - 0.5) * 1.2), 2.2, 0.5, 2.6, 0.55, 0xb7a684);
+  sfx.impact?.(range / BALL.sound, 1);
   const sg = x => (x >= 0 ? '+' : '−') + Math.abs(x);
   shotEl.hidden = false;
   shotEl.innerHTML =
@@ -720,29 +977,101 @@ function reportImpact(b, hit) {
     `<div class="row">飛行 ${b.t.toFixed(2)} 秒・${v.toFixed(0)} m/s・${(J / 1000).toFixed(1)} kJ</div>`;
 }
 
+// =====================================================================
+//  発射
+// =====================================================================
+const muzzleLocal = new THREE.Vector3(), muzzleWorld = new THREE.Vector3(), portWorld = new THREE.Vector3();
+const gpw = new THREE.Vector3();
+function gunPointToWorld(local, out) {
+  // 手前に描いた銃の点が画面上で重なる位置を、同じ距離で景色の中に置く
+  gpw.copy(local).applyMatrix4(gun.matrix);
+  const depth = gpw.length();
+  gpw.project(gunCam);
+  out.set(gpw.x, gpw.y, 0.5).unproject(camera).sub(camera.position).normalize().multiplyScalar(depth).add(camera.position);
+  return out;
+}
 function fire() {
   const now = performance.now() / 1000;
   if (S.reloading > 0) return;
-  if (now - S.lastShot < 0.18) return;          // 半自動：1回押すたびに1発
-  if (S.mag === 0) { playClick(0); return; }
-  S.lastShot = now; S.mag--; updateAmmo();
-  playShot();
-  gun.userData.flash.material.opacity = 1;
-  S.kick = 1;
-  S.recoilV += S.aiming ? 0.11 : 0.16;          // 視点の跳ね上がり
+  if (now - S.lastShot < 0.16) return;              // 半自動：1回押すたびに1発
+  if (S.mag === 0) { sfx.dry?.(); return; }
+  S.lastShot = now; S.mag--; S.shots++; updateAmmo();
+  if (S.mag === 0) S.boltLocked = true;             // 最終弾でボルトが後退したまま止まる
 
   launchBullet();
-  if (S.mag === 0 && S.reserve > 0) setTimeout(reload, 400);
+  sfx.shot?.();
+  sfx.brass?.(0.48 + Math.random() * 0.12);
+  try { navigator.vibrate?.([35, 20, 18]); } catch {}
+
+  // 反動（照準を合わせた射撃台での依託射撃。スコープ中は約8ミル跳ね上がって戻る）
+  const sc = S.aimT > 0.5;
+  S.rpv += sc ? 0.22 : 0.62;
+  S.ryv += (Math.random() - 0.35) * (sc ? 0.06 : 0.15);
+  S.kickV += 2.6; S.shake = 1; S.scopeKickV += 900; S.flashT = 1;
+
+  // 発射炎の形を毎回変える
+  const u = gun.userData;
+  u.flash.rotation.z = Math.random() * Math.PI;
+  u.flash.scale.set(0.8 + Math.random() * 0.5, 0.8 + Math.random() * 0.5, 0.7 + Math.random() * 0.7);
+  u.cover.rotation.z = -1.9;                        // 排莢口カバーが開く
+
+  // 硝煙（銃口から前へ吹き出し、風に流れる）
+  gun.updateMatrix();
+  gunPointToWorld(muzzleLocal.set(0, BORE_Y, MUZZLE_Z), muzzleWorld);
+  const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+  for (let i = 0; i < 12; i++) {
+    const sp = 2 + Math.random() * 9;
+    const v = fwd.clone().multiplyScalar(sp).addScaledVector(right, (Math.random() - 0.5) * 2.4).addScaledVector(up, (Math.random() - 0.3) * 1.6);
+    emitSmoke(muzzleWorld.clone().addScaledVector(fwd, 0.05 + Math.random() * 0.15), v, 2.2 + Math.random() * 1.6, 0.06, 0.9 + Math.random() * 0.9, 0.42);
+  }
+  // 側面に吹く消炎器の4方向ガス
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2 + Math.PI / 4;
+    const v = right.clone().multiplyScalar(Math.cos(a) * 3.5).addScaledVector(up, Math.sin(a) * 3.5).addScaledVector(fwd, 1.5);
+    emitSmoke(muzzleWorld.clone(), v, 1.4, 0.04, 0.5, 0.35);
+  }
+  // 排莢口から出る薄い煙
+  gunPointToWorld(muzzleLocal.set(0.03, 0.055, 0.0), portWorld);
+  for (let i = 0; i < 3; i++) emitSmoke(portWorld.clone(), right.clone().multiplyScalar(0.6 + Math.random() * 0.6).addScaledVector(up, 0.3), 1.6, 0.02, 0.25, 0.28);
+
+  // 空薬莢
+  const sh = shells[shellIdx]; shellIdx = (shellIdx + 1) % shells.length;
+  sh.m.position.set(0.03, 0.055, 0.0).applyMatrix4(gun.matrix);
+  sh.m.quaternion.copy(gun.quaternion); sh.m.rotateX(Math.PI / 2);
+  sh.v.set(2.2 + Math.random() * 0.8, 1.3 + Math.random() * 0.5, 0.5 + Math.random() * 0.4);
+  sh.w.set((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 6, 25 + Math.random() * 10);
+  sh.t = 0; sh.m.visible = true;
+
+  if (S.mag === 0 && S.reserve > 0) setTimeout(reload, 650);
 }
+
+// =====================================================================
+//  画面の描き方：景色→（弾筋で屈折）→手前の銃
+// =====================================================================
+const copyScene = new THREE.Scene(), orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+copyScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: sceneRT.texture, depthTest: false, depthWrite: false })));
+const dbs = new THREE.Vector2();
+function sizeTargets() {
+  renderer.getDrawingBufferSize(dbs);
+  sceneRT.setSize(dbs.x, dbs.y);
+  traceUniforms.uRes.value.copy(dbs);
+  traceUniforms.uStrength.value = 22 * renderer.getPixelRatio();
+}
+sizeTargets();
 
 // ---------- ループ ----------
 const posEl = document.getElementById('pos');
 const clock = new THREE.Clock();
-const WALK = 4.0; // m/s
+const WALK = 4.0;
 const lerpE = (a, b, t) => new THREE.Euler(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
 let t0 = 0;
+function spring(x, v, k, c, dt) { v += (-k * x - c * v) * dt; x += v * dt; return [x, v]; }
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05); t0 += dt;
+  const frozen = !!window.__freezeFx;                // 確認用：弾と弾筋を止める
+  if (!frozen) simNow += dt;
 
   // 移動
   let mx = move.x, my = move.y;
@@ -756,66 +1085,120 @@ function tick() {
   camera.position.y = EYE_H + 0.2;
 
   // リロード
+  let rl = 0, magDrop = 0;
   if (S.reloading > 0) {
     S.reloading -= dt;
+    const p = 1 - S.reloading / S.reloadLen;
+    rl = Math.sin(Math.min(1, p) * Math.PI);
+    magDrop = p < 0.2 ? p / 0.2 : p < 0.55 ? 1 : p < 0.7 ? 1 - (p - 0.55) / 0.15 : 0;   // 抜く→空→差す
     if (S.reloading <= 0) {
       const need = M110.magSize - S.mag, take = Math.min(need, S.reserve);
-      S.mag += take; S.reserve -= take; S.reloading = 0; updateAmmo();
+      S.mag += take; S.reserve -= take; S.reloading = 0; S.boltLocked = false; updateAmmo();
     }
   }
 
-  // 反動（ばねで戻る）
-  S.recoilV -= S.recoil * 90 * dt; S.recoilV *= Math.exp(-14 * dt);
-  S.recoil += S.recoilV * dt * 10;
-  S.kick *= Math.exp(-12 * dt);
-  const fl = gun.userData.flash.material; fl.opacity *= Math.exp(-40 * dt);
+  // 反動のばね（射撃台に依託しているので元の位置へ戻る）
+  [S.rp, S.rpv] = spring(S.rp, S.rpv, 170, 17, dt);
+  [S.ry, S.ryv] = spring(S.ry, S.ryv, 170, 17, dt);
+  [S.kick, S.kickV] = spring(S.kick, S.kickV, 420, 26, dt);
+  [S.scopeKick, S.scopeKickV] = spring(S.scopeKick, S.scopeKickV, 300, 22, dt);
+  S.shake *= Math.exp(-16 * dt);
+  if (!window.__freezeFx) S.flashT = Math.max(0, S.flashT - dt / 0.06);
 
-  // スコープの出し入れ
+  // スコープ
   S.aimT += ((S.aiming ? 1 : 0) - S.aimT) * Math.min(1, dt * 12);
   const inScope = S.aimT > 0.92;
   scopeCv.hidden = !inScope; zoomBox.hidden = !inScope;
   crossEl.style.display = S.aimT > 0.2 ? 'none' : ''; helpEl.style.display = S.aimT > 0.2 ? 'none' : '';
-  if (inScope) {
-    camera.fov = scopeFovDeg() * (innerHeight / (2 * scopeRadiusPx()));
-  } else {
-    camera.fov = BASE_FOV - S.aimT * 20;
-  }
+  if (inScope) camera.fov = scopeFovDeg() * (innerHeight / (2 * scopeRadiusPx()));
+  else camera.fov = BASE_FOV - S.aimT * 20;
+  camera.fov *= 1 + S.flashT * 0.012;               // 発砲の瞬間わずかに画面が押される
   camera.updateProjectionMatrix();
+  // 目とスコープの位置がずれて、黒い縁が一瞬動く
+  scopeCv.style.transform = `translate(${(S.ry * -1500).toFixed(1)}px, ${(S.scopeKick * 0.5).toFixed(1)}px)`;
+  flashEl.style.opacity = inScope ? (S.flashT * 0.55).toFixed(3) : '0';
 
-  // 構えの揺れ（呼吸）。スコープ中は小さく、射撃台に依託しているので約0.15ミル
+  // 揺れ（呼吸）＋発砲の振動
   const swayA = inScope ? 0.00015 : 0.0008;
   const swayX = Math.sin(t0 * 0.9) * swayA + Math.sin(t0 * 2.3) * swayA * 0.4;
   const swayY = Math.sin(t0 * 1.3 + 1) * swayA * 0.8;
-  camera.rotation.set(pitch + S.recoil * 0.12 + swayY, yaw + swayX, 0);
+  const shk = S.shake * (inScope ? 0.0012 : 0.004);
+  camera.rotation.set(pitch + S.rp + swayY + (Math.random() - 0.5) * shk, yaw + S.ry + swayX + (Math.random() - 0.5) * shk, (Math.random() - 0.5) * shk * 0.6);
 
-  // 銃の位置（腰だめ ⇄ 構え）
+  // 銃の位置
   const bob = moving && !S.aiming ? Math.sin(t0 * 9) * 0.006 : 0;
-  const rl = S.reloading > 0 ? Math.sin(Math.min(1, (2.6 - S.reloading) / 2.6) * Math.PI) : 0;
   gun.position.lerpVectors(HIP.pos, AIM.pos, S.aimT);
-  gun.position.y += bob - rl * 0.12; gun.position.z += S.kick * 0.045;
+  gun.position.y += bob - rl * 0.1 + S.kick * 0.1;
+  gun.position.z += S.kick * 0.5;                    // 肩へ約3cm下がる
   const r = lerpE(HIP.rot, AIM.rot, S.aimT);
-  gun.rotation.set(r.x + S.kick * 0.05 + rl * 0.5, r.y, r.z - rl * 0.35);
+  gun.rotation.set(r.x + S.kick * 0.6 + rl * 0.45, r.y + S.ry * 0.5, r.z - rl * 0.4 + S.kick * 0.08);
   gun.visible = !inScope;
+  const u = gun.userData;
+  u.mag.position.y = -magDrop * 0.3; u.mag.visible = magDrop < 0.98;
+
+  // 発射炎
+  const fv = S.flashT;
+  const flick = fv > 0 ? 0.7 + Math.random() * 0.3 : 0;
+  u.flashMat.opacity = fv * flick; u.starMat.opacity = fv * flick; u.glow.material.opacity = fv;
+  u.glow.scale.setScalar(0.18 + fv * 0.18);
+  u.gunLight.intensity = fv * 4;
+  muzzleLightW.intensity = fv * 60;
+  if (fv > 0) { gun.updateMatrix(); gunPointToWorld(muzzleLocal.set(0, BORE_Y, MUZZLE_Z - 0.1), muzzleLightW.position); }
+
+  // 空薬莢
+  for (const sh of shells) {
+    if (!sh.m.visible) continue;
+    sh.t += dt; sh.v.y -= 9.8 * dt;
+    sh.m.position.addScaledVector(sh.v, dt);
+    sh.m.rotation.x += sh.w.x * dt; sh.m.rotation.y += sh.w.y * dt; sh.m.rotation.z += sh.w.z * dt;
+    if (sh.t > 0.9) sh.m.visible = false;
+  }
 
   updateWind(t0, dt);
-  updateBullets(dt);
+  if (!frozen) updateBullets(dt);
 
-  // 土煙
+  // 煙
+  const near = inScope ? 0.03 : 1;
+  for (const s of smoke) {
+    if (!s.sp.visible) continue;
+    s.t += dt; const k = s.t / s.life;
+    if (k >= 1) { s.sp.visible = false; continue; }
+    const drag = Math.exp(-3.2 * dt);
+    s.v.multiplyScalar(drag);
+    s.v.x += (wind.vec[0] - s.v.x) * 0.9 * dt; s.v.z += (wind.vec[2] - s.v.z) * 0.9 * dt; s.v.y += 0.25 * dt;
+    s.p.addScaledVector(s.v, dt);
+    s.sp.position.copy(s.p);
+    const sz = s.s0 + (s.s1 - s.s0) * (1 - Math.pow(1 - k, 2.2));
+    s.sp.scale.setScalar(sz);
+    s.sp.material.rotation += s.rot * dt;
+    const d = s.p.distanceTo(camera.position);
+    s.sp.material.opacity = s.a * Math.min(1, s.t / 0.04) * Math.pow(1 - k, 1.6) * (d < 6 ? near : 1);
+  }
+  // 着弾の土煙
   for (let i = puffs.length - 1; i >= 0; i--) {
     const p = puffs[i]; p.t += dt;
-    if (p.t < 0) continue;
     const k = p.t / 1.6;
     p.sp.material.opacity = Math.max(0, 0.9 * (1 - k));
     const sc = 1.2 + k * 3.5;
     p.sp.scale.setScalar(sc);
-    p.sp.position.y = p.y0 + sc * 0.4 + k * 0.6;   // 地面に埋もれないよう持ち上げる
+    p.sp.position.y = p.y0 + sc * 0.4 + k * 0.6;
     if (k >= 1) { scene.remove(p.sp); p.sp.material.dispose(); puffs.splice(i, 1); }
   }
 
   posEl.textContent = `横 ${camera.position.x.toFixed(1)} m ／ 視線 ${((-yaw * 180 / Math.PI) % 360).toFixed(0)}°`;
 
-  renderer.clear();
-  renderer.render(scene, camera);
+  // 描画
+  camera.updateMatrixWorld();
+  renderer.setRenderTarget(sceneRT); renderer.clear(); renderer.render(scene, camera);
+  renderer.setRenderTarget(null); renderer.clear(); renderer.render(copyScene, orthoCam);
+  if (trails.length) {
+    traceUniforms.uTime.value = t0;
+    const pxW = 2 * Math.tan(camera.fov * Math.PI / 360) / innerHeight * 9;   // 太さ約18px
+    for (let i = trails.length - 1; i >= 0; i--) {
+      if (!updateTrail(trails[i], simNow, pxW)) { traceScene.remove(trails[i].mesh); trails[i].mesh.geometry.dispose(); trails.splice(i, 1); }
+    }
+    renderer.render(traceScene, camera);
+  }
   if (gun.visible) { renderer.clearDepth(); renderer.render(gunScene, gunCam); }
   requestAnimationFrame(tick);
 }
@@ -824,9 +1207,9 @@ updateAmmo(); drawScope(); tick();
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   gunCam.aspect = innerWidth / innerHeight; gunCam.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight); drawScope();
+  renderer.setSize(innerWidth, innerHeight); sizeTargets(); drawScope();
 });
 
 // テスト用の入口
-window.__game = { fire, toggleAim, setZoom, reload, S, gun, HIP, puffs, bullets, wind, ZERO_ANGLE, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, get pitch() { return pitch; }, set pitch(v) { pitch = v; } };
+window.__game = { fire, toggleAim, setZoom, reload, S, gun, HIP, camera, puffs, bullets, trails, smoke, wind, ZERO_ANGLE, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, get pitch() { return pitch; }, set pitch(v) { pitch = v; } };
 </script>
