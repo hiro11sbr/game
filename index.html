@@ -2172,7 +2172,7 @@ function updateRings(dt) {
     const r = rings[i]; r.t += dt; if (r.t < 0) { r.m.visible = false; continue; } r.m.visible = true;
     const k = r.t / (r.life || 0.4);
     if (k >= 1) { scene.remove(r.m); r.m.geometry.dispose(); r.m.material.dispose(); rings.splice(i, 1); continue; }
-    r.m.scale.setScalar(r.fixed ? 0.2 + k * r.size : 0.5 + k * 16); if (!r.fixed) r.m.lookAt(camera.position); r.m.material.opacity = (r.fixed ? 0.8 : 0.55) * (1 - k);
+    r.m.scale.setScalar(r.fixed ? 0.2 + k * r.size : 0.5 + k * 16); if (!r.fixed) r.m.lookAt(camera.position); r.m.material.opacity = (r.fixed ? (S.aimT > 0.9 ? 0.18 : 0.8) : 0.55) * (1 - k);   // スコープ中は目の前なので控えめに
   }
 }
 // =====================================================================
@@ -2198,7 +2198,7 @@ const beamMat = new THREE.ShaderMaterial({
     }`
 });
 // 丸い棒に見せるため、柔らかい円を光の道に沿って重ねる（どの角度から見ても丸い）
-const ROD_N = 160;
+const ROD_N = 260;
 const rodTex = canvasTex(64, (q, n) => { const gr = q.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,190,180,1)'); gr.addColorStop(0.18, 'rgba(255,40,25,1)'); gr.addColorStop(0.5, 'rgba(220,0,0,0.75)'); gr.addColorStop(0.8, 'rgba(200,0,0,0.2)'); gr.addColorStop(1, 'rgba(200,0,0,0)'); q.fillStyle = gr; q.fillRect(0, 0, n, n); });
 const headTex = canvasTex(64, (q, n) => { const gr = q.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,240,235,1)'); gr.addColorStop(0.25, 'rgba(255,60,40,0.95)'); gr.addColorStop(0.6, 'rgba(255,0,0,0.35)'); gr.addColorStop(1, 'rgba(255,0,0,0)'); q.fillStyle = gr; q.fillRect(0, 0, n, n); });
 function makeTube() {
@@ -2221,7 +2221,8 @@ function fireLaser() {
   const all = zoneRay.intersectObjects(hitables.filter(o => shown(o) || o === activeGround), false);
   const h0 = all.find(x => x.object === activeGround || shown(x.object));
   const end = h0 ? h0.point.clone() : eye.clone().addScaledVector(dir, 9000);
-  gun.updateMatrix(); const mz = gunPointToWorld(muzzleLocal.copy(gun.userData.muzzle), new THREE.Vector3());
+  gun.updateMatrix(); let mz = gunPointToWorld(muzzleLocal.copy(gun.userData.muzzle), new THREE.Vector3());
+  if (S.aimT > 0.9) mz = eye.clone().addScaledVector(f, 1.2).addScaledVector(r, 0.22).addScaledVector(u, -0.2);   // スコープ中は右下から飛び込んで見えるように
   const mat = beamMat.clone();
   const mesh = new THREE.Group(); mesh.renderOrder = 5; traceScene.add(mesh);
   const dotMat = new THREE.SpriteMaterial({ map: rodTex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false });
@@ -2263,18 +2264,19 @@ function updateBeams(dt, pxW) {
     const headDist = L * hk;
     B.mesh.userData.dotMat.opacity = a; const sc0 = S.aimT > 0.9;
     for (let k = 0; k < ROD_N; k++) {
-      const sp = B.mesh.children[k], along = L * Math.pow(k / (ROD_N - 1), 2.4);
-      if (sc0 && along < 1.2) { sp.visible = false; continue; }   // スコープ中は目の前の部分を描かない
+      const sp = B.mesh.children[k], along = L * Math.pow(k / (ROD_N - 1), 3.0);
+
       sp.visible = along <= headDist;
       if (!sp.visible) continue;
       _bp.copy(B.a).addScaledVector(_bd, along); sp.position.copy(_bp);
       const d = _bp.distanceTo(camera.position);
-      sp.scale.setScalar(2 * Math.max(along < 3 && !sc0 ? 0.05 : 0, d * pxW * (since < 0.12 ? 1.5 : 1.0) * (sc0 ? 1.6 : 1)));
+      sp.scale.setScalar(2 * Math.max(Math.min(0.07 * (since < 0.12 ? 1.3 : 1), d * pxW * 2.0), d * pxW * 0.28));   // 実際の太さ約14cm（遠くほど細い）。画面上は最大約14px・最小約2px
     }
     // 光る先端
     _bt.copy(B.a).addScaledVector(_bd, headDist);
     B.head.position.copy(_bt); B.head.visible = !B.arrived || since < 0.1;
-    B.head.scale.setScalar(0.09 * 2 * Math.tan(camera.fov * Math.PI / 360) * (0.8 + Math.random() * 0.4));
+    { const hd = _bt.distanceTo(camera.position), sc = Math.max(0.3, hd * pxW * 0.8) / (hd || 1);   // 先端の光も遠くほど小さく
+      B.head.scale.setScalar(sc * 2 * (0.8 + Math.random() * 0.4)); }
     // 稲妻：ビームに沿ってバチバチ走る（先端付近と銃口付近に多め）
     const LP = B.lines.geometry.attributes.position.array; let n = 0;
     for (let k = 0; k < B.ARCS; k++) {
