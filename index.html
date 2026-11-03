@@ -401,6 +401,7 @@ function cityHeightAt(x, z) {
 }
 const isWater = (x, z) => Math.abs(z - RIVER_Z) < 62 && cityHeightAt(x, z) <= WATER_Y + 0.01;
 const cityGroup = new THREE.Group(); cityGroup.visible = false; scene.add(cityGroup);
+const cityRoofs = [];
 const TARGET = { x: 40, z: -3548, h: 14 };   // 射撃位置（z=-8）から3,540m
 {
   // 地面（乾いた土と砂）
@@ -436,6 +437,7 @@ const TARGET = { x: 40, z: -3548, h: 14 };   // 射撃位置（z=-8）から3,54
     if (n >= MAX) return; const y = cityHeightAt(x, z) - 0.5;
     m4.compose(p4.set(x, y, z), q4, s4.set(w, h + 0.5, d)); inst.setMatrixAt(n, m4);
     bc.setHSL(0.09 + r() * 0.03, 0.18 + r() * 0.15, 0.62 + r() * 0.18); inst.setColorAt(n, bc); n++;
+    cityRoofs.push({ x, z, w, d, top: y + 0.5 + h });
   };
   for (let z = 60; z > -4400; z -= 55) for (let x = -1500; x < 1500; x += 55) {
     const cx = x + (r() - 0.5) * 20, cz = z + (r() - 0.5) * 20;
@@ -453,6 +455,7 @@ const TARGET = { x: 40, z: -3548, h: 14 };   // 射撃位置（z=-8）から3,54
   const conc = new THREE.MeshLambertMaterial({ color: 0xcfc3a8 }), conc2 = new THREE.MeshLambertMaterial({ color: 0xb3a68a });
   const tower = new THREE.Mesh(new THREE.BoxGeometry(26, CITY_ROOF, 28), new THREE.MeshLambertMaterial({ map: winTex, color: 0xe0d6c0 }));
   tower.position.set(0, CITY_ROOF / 2, 4); tower.userData = { kind: 'ビル', mat: 'concrete' }; cityGroup.add(tower); hitables.push(tower);
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(26, 0.06, 28), conc); slab.position.set(0, CITY_ROOF + 0.03, 4); cityGroup.add(slab);   // 屋上の床
   for (const [w, d, x, z] of [[26, 0.4, 0, -9.8], [26, 0.4, 0, 17.8], [0.4, 28, -12.8, 4], [0.4, 28, 12.8, 4]]) {
     const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 1.0, d), conc2); wall.position.set(x, CITY_ROOF + 0.5, z); cityGroup.add(wall);
   }
@@ -478,6 +481,7 @@ const TARGET = { x: 40, z: -3548, h: 14 };   // 射撃位置（z=-8）から3,54
     hitables.push(plate); plates.push(pivot);
   };
   addPlate(TARGET.x, roofY, TARGET.z, 2.0, 2.5, '記録3540m鉄板');
+  cityRoofs.push({ x: TARGET.x, z: TARGET.z, w: 22, d: 22, top: roofY, target: true });
   for (const d of [1000, 2000, 3000]) addPlate(TARGET.x, cityHeightAt(TARGET.x, -d), -d, 1.0 + d / 2000, 1.4 + d / 1600, d + 'm鉄板');
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(10, 4), new THREE.MeshBasicMaterial({ map: makeLabel('3540m'), fog: true }));
   sign.position.set(TARGET.x + 18, roofY + 4, TARGET.z); sign.lookAt(0, roofY + 4, 0); cityGroup.add(sign);
@@ -488,6 +492,131 @@ const STAGE_LOOK = {
   city: { fog: 0xd9ccb1, top: 0x6f9cc4, near: 900, far: 8000, hs: 0xeee2c8, hg: 0x8a7558, sun: 0xffe2b8, si: 2.7 },
 };
 const STAGE_NAME = { range: '射撃場', hunt: '猟場（ヒグマ）', city: '都市（3,540m）' };
+
+// =====================================================================
+//  敵兵（架空。記章のない装備の兵士。実在の組織・人物ではない）
+//  身長約1.75m。屋上を巡回し、銃声や近くへの着弾で走って隠れる
+// =====================================================================
+const SOL_MAT = {
+  uni: new THREE.MeshLambertMaterial({ color: 0x5f6143 }), uni2: new THREE.MeshLambertMaterial({ color: 0x4c4e35 }),
+  gear: new THREE.MeshLambertMaterial({ color: 0x3a3a2b }), skin: new THREE.MeshLambertMaterial({ color: 0xa98466 }),
+  boot: new THREE.MeshLambertMaterial({ color: 0x2a241d }), gun: new THREE.MeshLambertMaterial({ color: 0x1c1c1c }),
+  zone: new THREE.MeshBasicMaterial({ visible: false }),
+};
+function buildSoldier() {
+  const g = new THREE.Group();                     // 足元が原点・前が +z
+  const body = new THREE.Group(); g.add(body);
+  const hips = new THREE.Group(); hips.position.y = 0.95; body.add(hips);
+  const torso = new THREE.Group(); hips.add(torso);
+  const cap = (r, l, m, x, y, z, parent) => { const o = new THREE.Mesh(new THREE.CapsuleGeometry(r, l, 4, 10), m); o.position.set(x, y, z); parent.add(o); return o; };
+  cap(0.16, 0.34, SOL_MAT.uni, 0, 0.3, 0, torso);                                                  // 胴
+  const vest = new THREE.Mesh(new RoundedBoxGeometry(0.36, 0.36, 0.28, 2, 0.05), SOL_MAT.gear); vest.position.set(0, 0.32, 0.01); torso.add(vest);
+  const headG = new THREE.Group(); headG.position.set(0, 0.66, 0); torso.add(headG);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 10), SOL_MAT.skin); head.scale.set(0.9, 1.05, 1); headG.add(head);
+  const helm = new THREE.Mesh(new THREE.SphereGeometry(0.125, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), SOL_MAT.uni2); helm.position.y = 0.025; headG.add(helm);
+  const arms = [];
+  for (const sx of [-1, 1]) {
+    const sh = new THREE.Group(); sh.position.set(sx * 0.21, 0.5, 0); torso.add(sh);
+    cap(0.055, 0.22, SOL_MAT.uni, 0, -0.15, 0, sh);
+    const el = new THREE.Group(); el.position.set(0, -0.3, 0); sh.add(el);
+    cap(0.05, 0.2, SOL_MAT.uni, 0, -0.12, 0, el);
+    arms.push({ sh, el, sx });
+  }
+  const rifle = new THREE.Group(); rifle.position.set(0.05, 0.28, 0.2); rifle.rotation.set(-0.15, 0.25, 0.9); torso.add(rifle);   // 胸の前に構えた小銃
+  const rb = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.75), SOL_MAT.gun); rifle.add(rb);
+  const mg = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 0.06), SOL_MAT.gun); mg.position.set(0, -0.1, 0.06); mg.rotation.x = 0.3; rifle.add(mg);
+  const legs = [];
+  for (const sx of [-1, 1]) {
+    const hp = new THREE.Group(); hp.position.set(sx * 0.1, 0, 0); hips.add(hp);
+    cap(0.075, 0.3, SOL_MAT.uni2, 0, -0.22, 0, hp);
+    const kn = new THREE.Group(); kn.position.set(0, -0.46, 0); hp.add(kn);
+    cap(0.065, 0.3, SOL_MAT.uni2, 0, -0.2, 0, kn);
+    const boot = new THREE.Mesh(new RoundedBoxGeometry(0.11, 0.08, 0.24, 2, 0.03), SOL_MAT.boot); boot.position.set(0, -0.43, 0.04); kn.add(boot);
+    legs.push({ hp, kn, sx });
+  }
+  // 当たり判定：頭・胴・手足
+  const zone = (name, geo, x, y, z, sx, sy, sz, parent) => { const m = new THREE.Mesh(geo, SOL_MAT.zone); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.userData.zone = name; parent.add(m); return m; };
+  const sph = new THREE.SphereGeometry(1, 12, 8);
+  const zones = [
+    zone('head', sph, 0, 0.02, 0, 0.13, 0.15, 0.13, headG),
+    zone('torso', sph, 0, 0.3, 0, 0.23, 0.36, 0.17, torso),
+    zone('limb', sph, 0, -0.45, 0, 0.2, 0.48, 0.14, hips),
+    zone('limb', sph, 0, 0.35, 0.16, 0.32, 0.14, 0.2, torso),
+  ];
+  return { g, body, hips, torso, headG, arms, legs, zones };
+}
+const enemies = [];
+const OPS = { down: 0, fled: 0, wounded: 0 };
+function spawnEnemy(onTarget) {
+  const camP = new THREE.Vector3(0, 0, -8);
+  const cands = cityRoofs.filter(r => onTarget ? r.target : (!r.target && Math.abs(r.x) < 900 && r.w > 12 && r.d > 12 && Math.hypot(r.x - camP.x, r.z - camP.z) > 350));
+  const roof = cands[Math.floor(Math.random() * cands.length)]; if (!roof) return;
+  const parts = buildSoldier();
+  const e = { ...parts, roof, state: 'idle', t: 1 + Math.random() * 4, speed: 0, heading: Math.random() * 6.28, target: null, phase: Math.random() * 6, alertAt: -1, fall: 0, deadT: 0, fallDir: 1, wounded: false, runT: 0 };
+  const mx = roof.w / 2 - 1.5, mz = roof.d / 2 - 1.5;
+  parts.g.position.set(roof.x + (Math.random() * 2 - 1) * mx, roof.top, roof.z + (Math.random() * 2 - 1) * mz);
+  parts.g.rotation.y = e.heading;
+  for (const zn of parts.zones) { zn.userData.enemy = e; zn.userData.kind = '敵兵'; hitables.push(zn); }
+  cityGroup.add(parts.g); enemies.push(e);
+}
+function removeEnemy(e) {
+  cityGroup.remove(e.g);
+  for (const zn of e.zones) { const i = hitables.indexOf(zn); if (i >= 0) hitables.splice(i, 1); }
+  enemies.splice(enemies.indexOf(e), 1);
+}
+function alertEnemy(e, delay) {
+  if (e.state === 'down' || e.state === 'falling' || e.state === 'run') return;
+  if (e.alertAt < 0 || simNow + delay < e.alertAt) e.alertAt = simNow + delay;
+}
+function enemyHit(e, zone) {
+  if (e.state === 'down' || e.state === 'falling') return;
+  if (zone === 'limb' && !e.wounded) { e.wounded = true; OPS.wounded++; e.state = 'run'; e.runT = 4; runAway(e); return; }
+  e.state = 'falling'; e.fall = 0; e.fallDir = Math.random() < 0.6 ? -1 : 1;
+}
+function runAway(e) {
+  const p = e.g.position; e.heading = Math.atan2(p.x - camera.position.x, p.z - camera.position.z) + (Math.random() - 0.5) * 1.6;
+}
+function updateEnemies(dt) {
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i], p = e.g.position, R = e.roof;
+    if (e.alertAt >= 0 && simNow >= e.alertAt && (e.state === 'idle' || e.state === 'walk')) { e.state = 'run'; e.runT = 2 + Math.random() * 2; runAway(e); e.alertAt = -1; }
+    let target = 0;
+    if (e.state === 'idle') { e.t -= dt; if (e.t <= 0) { e.state = 'walk'; e.t = 3 + Math.random() * 6; e.heading += (Math.random() - 0.5) * 2.5; } }
+    else if (e.state === 'walk') { target = 1.3; e.t -= dt; if (e.t <= 0) { e.state = 'idle'; e.t = 2 + Math.random() * 5; } }
+    else if (e.state === 'run') {
+      target = e.wounded ? 2.2 : 4.5; e.runT -= dt;
+      if (e.runT <= 0) { OPS.fled++; removeEnemy(e); setTimeout(() => { if (stage === 'city') spawnEnemy(false); }, 4000 + Math.random() * 6000); continue; }   // 物陰に隠れて見えなくなった
+    } else if (e.state === 'falling') {
+      e.fall = Math.min(1, e.fall + dt / 0.6);
+      const k = e.fall * e.fall;
+      e.body.rotation.x = e.fallDir * k * 1.45; e.body.position.y = -k * 0.12;
+      for (const L of e.legs) L.kn.rotation.x = k * 0.9;
+      if (e.fall >= 1) { e.state = 'down'; e.deadT = 20; OPS.down++; }
+    } else if (e.state === 'down') {
+      e.deadT -= dt; if (e.deadT <= 0) { const onT = R.target; removeEnemy(e); spawnEnemy(onT); continue; }
+    }
+    e.speed += (target - e.speed) * Math.min(1, dt * 4);
+    p.x += Math.sin(e.heading) * e.speed * dt; p.z += Math.cos(e.heading) * e.speed * dt;
+    // 屋上の端で向きを変える（走って逃げるときは端を越えて隠れる扱い）
+    const mx = R.w / 2 - 1.2, mz = R.d / 2 - 1.2;
+    if (e.state !== 'run') {
+      if (Math.abs(p.x - R.x) > mx || Math.abs(p.z - R.z) > mz) { p.x = Math.max(R.x - mx, Math.min(R.x + mx, p.x)); p.z = Math.max(R.z - mz, Math.min(R.z + mz, p.z)); e.heading += Math.PI * (0.6 + Math.random() * 0.8); }
+    } else { p.x = Math.max(R.x - R.w / 2 + 0.4, Math.min(R.x + R.w / 2 - 0.4, p.x)); p.z = Math.max(R.z - R.d / 2 + 0.4, Math.min(R.z + R.d / 2 - 0.4, p.z)); }
+    const dy = e.heading - e.g.rotation.y; e.g.rotation.y += Math.atan2(Math.sin(dy), Math.cos(dy)) * Math.min(1, dt * 5);
+    // 歩き方・走り方
+    if (e.state === 'idle' || e.state === 'walk' || e.state === 'run') {
+      const run = e.state === 'run';
+      e.phase += dt * (run ? 9 : 5.2) * (e.speed > 0.1 ? 1 : 0);
+      const amp = run ? 0.75 : 0.42;
+      for (const L of e.legs) { const s2 = Math.sin(e.phase + (L.sx > 0 ? Math.PI : 0)); L.hp.rotation.x = s2 * amp * Math.min(1, e.speed); L.kn.rotation.x = Math.max(0, -s2) * amp * 1.1 * Math.min(1, e.speed); }
+      e.hips.position.y = 0.95 - (run ? 0.1 : 0) + Math.abs(Math.sin(e.phase)) * 0.03 * Math.min(1, e.speed);
+      e.torso.rotation.x = run ? 0.35 : 0.03;
+      e.headG.rotation.y = e.state === 'idle' ? Math.sin(simNow * 0.7 + i) * 0.7 : 0;        // 見回す
+      for (const A of e.arms) A.sh.rotation.x = -0.9 + (run ? Math.sin(e.phase + (A.sx > 0 ? 0 : Math.PI)) * 0.2 : 0);
+      for (const A of e.arms) A.el.rotation.x = -0.9;
+    }
+  }
+}
 
 // =====================================================================
 //  ヒグマ（体長約2m・肩の高さ約1m。肩の盛り上がりが特徴）
@@ -580,6 +709,8 @@ function setStage(st) {
   document.getElementById('modeName').textContent = STAGE_NAME[st];
   while (bears.length) removeBear(bears[0]);
   if (huntMode) for (let i = 0; i < 3; i++) spawnBear();
+  while (enemies.length) removeEnemy(enemies[0]);
+  if (st === 'city') { spawnEnemy(true); for (let i = 0; i < 4; i++) spawnEnemy(false); }
   if (st === 'city') { camera.position.set(0, CITY_ROOF + EYE_H + 0.2, -8.2); yaw = 0; pitch = 0; if (weaponIdx === 0) setWeapon(1); }
   else camera.position.set(0, EYE_H + 0.2, 2);
 }
@@ -1589,6 +1720,11 @@ function updateBullets(dt) {
       const all = ray.intersectObjects(objs, false), h0 = all[0];
       if (h0) {
         hit = { point: h0.point, obj: h0.object, normal: h0.face.normal.clone().transformDirection(h0.object.matrixWorld), dir: ray.ray.direction.clone() };
+        const ez = h0.object.userData.enemy;
+        if (ez) {   // 頭＞胴＞手足
+          const zs = all.filter(x => x.object.userData.enemy === ez).map(x => x.object.userData.zone);
+          hit.zone = zs.includes('head') ? 'head' : zs.includes('torso') ? 'torso' : 'limb'; hit.enemy = ez;
+        }
         const bz = h0.object.userData.bear;
         if (bz) {   // 同じクマの中で、弾が通った一番重要な部位で判定（急所＞頭＞胴）
           const zs = all.filter(x => x.object.userData.bear === bz).map(x => x.object.userData.zone);
@@ -1745,6 +1881,7 @@ function explode(hit, range) {
     const d = bb.g.position.distanceTo(hit.point);
     if (d < 6) bearHit(bb, 'head'); else if (d < 150) startle(bb, 0);
   }
+  for (const ee of enemies) { const d = ee.g.position.distanceTo(hit.point); if (d < 8) enemyHit(ee, 'torso'); else if (d < 120) alertEnemy(ee, 0); }
   for (const pv of plates) { const d = pv.getWorldPosition(tmpV).distanceTo(hit.point); if (d < 5) pv.userData.v += 3.5 * (1 - d / 5) + 1; }
   sfx.explode?.(range / BALL.sound, range);
 }
@@ -1763,6 +1900,12 @@ function reportImpact(b, hit) {
   const v = Math.hypot(b.v[0], b.v[1], b.v[2]), J = 0.5 * b.mass * v * v;
   let mat = hit.water ? 'water' : hit.obj.userData.mat || 'dirt', what = hit.water ? '川' : hit.obj.userData.kind || '標的';
   if (hit.bear && b.ex) hit.zone = 'head';      // 炸裂弾はどこに当たっても致命傷
+  if (hit.enemy) {
+    if (b.ex) hit.zone = 'torso';
+    mat = 'bear';
+    what = hit.zone === 'head' ? '<b>敵兵・頭（無力化）</b>' : hit.zone === 'torso' ? '<b>敵兵・胴（無力化）</b>' : '敵兵・手足（負傷・逃走）';
+    enemyHit(hit.enemy, hit.zone);
+  }
   if (hit.bear) {
     mat = 'bear';
     what = hit.zone === 'vital' ? '<b>ヒグマ・急所（心臓・肺）</b>' : hit.zone === 'head' ? '<b>ヒグマ・頭</b>' : 'ヒグマ・胴（手負い）';
@@ -1771,6 +1914,7 @@ function reportImpact(b, hit) {
   impactFx(hit, mat, J / 1000, range);
   if (b.ex) { explode(hit, range); what = hit.bear ? '<b>ヒグマ・炸裂弾で即倒</b>' : what + '・炸裂'; }
   for (const bb of bears) if (bb !== hit.bear && bb.g.position.distanceTo(hit.point) < 25) startle(bb, 0);   // 近くに着弾すると驚いて逃げる
+  for (const ee of enemies) if (ee !== hit.enemy && ee.g.position.distanceTo(hit.point) < 30) alertEnemy(ee, 0.2 + Math.random() * 0.5);
   const sg = x => (x >= 0 ? '+' : '−') + Math.abs(x);
   shotEl.hidden = false;
   shotEl.innerHTML =
@@ -1804,6 +1948,10 @@ function fire() {
 
   launchBullet();
   sfx.shot?.(ammo.boom);
+  for (const ee of enemies) {   // 敵兵も銃声で警戒する（遠いほど気付きにくい）
+    const d = ee.g.position.distanceTo(camera.position);
+    if (Math.random() < (d < 800 ? 0.6 : d < 2000 ? 0.3 : 0.1)) alertEnemy(ee, d / BALL.sound + 0.3);
+  }
   for (const bb of bears) {   // 銃声は音速で届く。近いほど逃げやすい
     const d = bb.g.position.distanceTo(camera.position);
     if (Math.random() < (d < 400 ? 0.75 : d < 1000 ? 0.4 : 0.15)) startle(bb, d / BALL.sound);
@@ -2032,7 +2180,7 @@ function tick() {
     if (k >= 1) { scene.remove(p.sp); p.sp.material.dispose(); puffs.splice(i, 1); }
   }
 
-  if (!frozen) { updateBears(dt); updateRings(dt); }
+  if (!frozen) { updateBears(dt); updateRings(dt); updateEnemies(dt); }
   if (huntMode) {
     // 観測手：一番近い生きているヒグマの方向と距離
     let best = null, bd = 1e9;
@@ -2045,7 +2193,18 @@ function tick() {
       txt += `<br>観測手：${Math.abs(deg) <= 1 ? '正面' : (deg > 0 ? '左 ' : '右 ') + Math.abs(deg) + '°'}・約${Math.round(bd / 10) * 10} m（${st}）`;
     }
     posEl.innerHTML = txt;
-  } else if (stage === 'city') posEl.innerHTML = `屋上 ${CITY_ROOF} m・標的は <b>3,540 m</b> 先の屋上の鉄板`;
+  } else if (stage === 'city') {
+    let best = null, bd = 1e9;
+    for (const ee of enemies) { if (ee.state === 'down' || ee.state === 'falling') continue; const d = ee.g.position.distanceTo(camera.position); if (d < bd) { bd = d; best = ee; } }
+    let txt = `無力化 <b>${OPS.down}</b>・負傷 ${OPS.wounded}・隠れた ${OPS.fled}`;
+    if (best) {
+      const bp = best.g.position, br = Math.atan2(-(bp.x - camera.position.x), -(bp.z - camera.position.z));
+      let rel = br - (yaw + S.ry); rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+      const deg = Math.round(rel * 180 / Math.PI), st = best.state === 'run' ? '走っている' : best.state === 'walk' ? '巡回中' : '見張り中';
+      txt += `<br>観測手：${Math.abs(deg) <= 1 ? '正面' : (deg > 0 ? '左 ' : '右 ') + Math.abs(deg) + '°'}・約${Math.round(bd / 10) * 10} m の屋上（${st}）`;
+    }
+    posEl.innerHTML = txt;
+  }
   else posEl.textContent = `横 ${camera.position.x.toFixed(1)} m ／ 視線 ${((-yaw * 180 / Math.PI) % 360).toFixed(0)}°`;
 
   // 描画
@@ -2072,5 +2231,5 @@ addEventListener('resize', () => {
 });
 
 // テスト用の入口
-window.__game = { stepBullet, get zero() { return ZERO_ANGLE; }, setStage, get stage() { return stage; }, setWeapon, get gunObj() { return gun; }, bears, setHunt, HUNT, fire, toggleAim, setZoom, reload, S, gun, HIP, camera, puffs, dial, setAmmo, rangefind, plates, decals, get ammo() { return ammo; }, bullets, trails, smoke, wind, ZERO_ANGLE, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, get pitch() { return pitch; }, set pitch(v) { pitch = v; } };
+window.__game = { enemies, OPS, stepBullet, get zero() { return ZERO_ANGLE; }, setStage, get stage() { return stage; }, setWeapon, get gunObj() { return gun; }, bears, setHunt, HUNT, fire, toggleAim, setZoom, reload, S, gun, HIP, camera, puffs, dial, setAmmo, rangefind, plates, decals, get ammo() { return ammo; }, bullets, trails, smoke, wind, ZERO_ANGLE, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, get pitch() { return pitch; }, set pitch(v) { pitch = v; } };
 </script>
