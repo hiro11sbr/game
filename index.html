@@ -2689,6 +2689,9 @@ function tick() {
   // 銃の位置
   const bob = moving && !S.aiming ? Math.sin(t0 * 9) * 0.006 : 0;
   gun.position.lerpVectors(HIP.pos, AIM.pos, S.aimT);
+  { const asp = innerWidth / innerHeight;                     // 縦画面では銃を中央寄り・少し下に置き、視野を広げて全体が映るようにする
+    if (asp < 1.2) { const k = 1 - S.aimT; gun.position.x *= 1 - 0.55 * k; gun.position.y -= 0.03 * k; gun.position.z -= 0.08 * k; }
+    const gf = asp < 1.2 ? 72 : 48; if (gunCam.fov !== gf) { gunCam.fov = gf; gunCam.updateProjectionMatrix(); } }
   gun.position.y += bob - rl * 0.1 + S.kick * 0.1;
   gun.position.z += S.kick * 0.5;                    // 肩へ約3cm下がる
   const r = lerpE(HIP.rot, AIM.rot, S.aimT);
